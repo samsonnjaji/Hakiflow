@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, ArrowRight, Camera, Check, FileImage, FileText, LockKeyhole, Mic2, Paperclip, Sparkles, UploadCloud, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Camera, Check, CheckCircle2, FileImage, FileText, LockKeyhole, Mic2, Paperclip, Sparkles, UploadCloud, X } from 'lucide-react'
 import { analyzeCase, createCase, extractEvidence, transcribeVoice } from '../api'
 import { PageHeader } from '../components/AppShell'
 import { useAuth } from '../context/AuthContext'
 import type { Evidence, IntakePayload } from '../types'
 
 type Draft = Omit<IntakePayload, 'evidence'> & { evidence: IntakePayload['evidence'] }
+type SavedCase = { id: string; reference: string }
 const initialDraft: Draft = {
   claimantName: '', respondentName: '', respondentAddress: '', amount: 0,
   claimType: 'Unpaid goods or services', story: '', language: 'en',
@@ -41,6 +42,9 @@ export function IntakePage() {
   const [voiceError, setVoiceError] = useState('')
   const [evidenceError, setEvidenceError] = useState('')
   const [error, setError] = useState('')
+  const [savedCase, setSavedCase] = useState<SavedCase | null>(() => {
+    try { return JSON.parse(localStorage.getItem('katiba_os_pending_analysis') ?? 'null') as SavedCase | null } catch { return null }
+  })
   const [draft, setDraft] = useState<Draft>(() => {
     const saved = localStorage.getItem('katiba_os_intake_draft')
     return saved ? JSON.parse(saved) as Draft : { ...initialDraft, claimantName: user?.name ?? '' }
@@ -214,13 +218,22 @@ export function IntakePage() {
   async function finish() {
     if (!canContinue) return
     setAnalyzing(true); setError('')
+    let pending = savedCase
     try {
-      const created = await createCase(draft)
-      const analyzed = await analyzeCase(created.id)
+      if (!pending) {
+        const created = await createCase(draft)
+        pending = { id: created.id, reference: created.reference }
+        setSavedCase(pending)
+        localStorage.setItem('katiba_os_pending_analysis', JSON.stringify(pending))
+      }
+      const analyzed = await analyzeCase(pending.id)
       localStorage.removeItem('katiba_os_intake_draft')
+      localStorage.removeItem('katiba_os_pending_analysis')
       navigate(`/app/cases/${analyzed.id}?new=1`)
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Analysis could not be completed. Try again.')
+      setError(pending
+        ? 'The evidence assessment did not finish, but your saved claim is unchanged. Retry when ready.'
+        : reason instanceof Error ? reason.message : 'Analysis could not be completed. Try again.')
       setAnalyzing(false)
     }
   }
@@ -284,19 +297,19 @@ export function IntakePage() {
           </div>}
 
           {step === 4 && <div className="step-panel review-step">
-            <span className="step-eyebrow">Step 4 of 4</span><h2>Ready for the evidence check.</h2><p>Katiba AI will organize facts and identify gaps. It will not decide your case or submit anything.</p>
+            <span className="step-eyebrow">Step 4 of 4</span><h2>Ready for the evidence check.</h2><p>Your claim is saved first. Katiba AI then organizes facts and identifies gaps; it will not decide or submit the case.</p>
             <div className="review-summary">
               <div><small>Claimant</small><strong>{draft.claimantName}</strong></div><div><small>Respondent</small><strong>{draft.respondentName}</strong></div><div><small>Amount</small><strong>KES {draft.amount.toLocaleString()}</strong></div><div><small>Evidence</small><strong>{draft.evidence.length} items</strong></div>
             </div>
             <div className="ai-will-do"><div><Sparkles /></div><p><strong>What the AI will do</strong><span>Read supported evidence content and flag unreadable files</span><span>Extract dates, amounts, parties, and promises</span><span>Build an evidence-linked timeline</span><span>Show strengths, gaps, sources, and confidence</span></p></div>
             <label className="consent-check"><input type="checkbox" checked={draft.consent} onChange={(e) => update('consent', e.target.checked)} /><span><Check /></span><p><strong>I consent to this evidence being analyzed for this claim.</strong><small>I understand the result is guidance and a draft for human review, not legal representation or a court decision.</small></p></label>
-            {error && <div className="inline-error" role="alert">{error}</div>}
+            {error && savedCase ? <div className="analysis-recovery" role="alert"><CheckCircle2 /><div><strong>Claim saved as {savedCase.reference}</strong><p>{error} You do not need to enter your story or evidence again.</p><button className="text-button" onClick={() => navigate(`/app/cases/${savedCase.id}`)}>Open saved case</button></div></div> : error && <div className="inline-error" role="alert">{error}</div>}
           </div>}
 
           <footer className="step-footer">
             <button className="button button-quiet" onClick={() => step > 1 ? setStep(step - 1) : navigate('/app')}><ArrowLeft size={18} /> {step > 1 ? 'Back' : 'Cancel'}</button>
             {!canContinue && <span className="step-requirement">{stepRequirement}</span>}
-            {step < 4 ? <button className="button button-primary" disabled={!canContinue || scanningEvidence} onClick={() => setStep(step + 1)}>Continue <ArrowRight size={18} /></button> : <button className="button button-primary analyze-button" disabled={!canContinue || analyzing || scanningEvidence} onClick={finish}>{analyzing ? <><span className="spinner" /> Building evidence graph…</> : <><Sparkles size={18} /> Analyze my evidence</>}</button>}
+            {step < 4 ? <button className="button button-primary" disabled={!canContinue || scanningEvidence} onClick={() => setStep(step + 1)}>Continue <ArrowRight size={18} /></button> : <button className="button button-primary analyze-button" disabled={!canContinue || analyzing || scanningEvidence} onClick={finish}>{analyzing ? <><span className="spinner" /> Building evidence graph…</> : <><Sparkles size={18} /> {savedCase ? 'Retry evidence analysis' : 'Analyze my evidence'}</>}</button>}
           </footer>
         </section>
       </div>

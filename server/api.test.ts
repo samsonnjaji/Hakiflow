@@ -57,6 +57,19 @@ describe('Katiba OS API', () => {
     expect(analyzed.body.issues.length).toBeGreaterThan(0)
   })
 
+  it('analyzes multiple claims without reusing citation identifiers', async () => {
+    const created = await request(app).post('/api/cases').set('Authorization', `Bearer ${claimantToken}`).send({
+      claimantName: 'Amina Wanjiku', respondentName: 'Second Demo Respondent', respondentAddress: 'Demo House, Nairobi', amount: 42000,
+      claimType: 'Unpaid goods or services', story: 'I supplied goods after receiving a written order. The respondent accepted delivery but did not pay after two written follow ups.',
+      language: 'en', courtStation: 'Milimani Small Claims Court', consent: true,
+      evidence: [{ name: 'Second-Invoice.txt', type: 'text/plain', size: 128, category: 'agreement', extractedText: 'Invoice DEMO-42 for KES 42,000.' }],
+    })
+    const analyzed = await request(app).post(`/api/cases/${created.body.id}/analyze`).set('Authorization', `Bearer ${claimantToken}`)
+    expect(analyzed.status).toBe(200)
+    expect(analyzed.body.timeline.length).toBeGreaterThan(0)
+    expect(analyzed.body.citations.every((citation: { id: string }) => citation.id.startsWith(`${created.body.id}:`))).toBe(true)
+  })
+
   it('prevents a citizen from performing professional sign-off', async () => {
     const response = await request(app).patch('/api/cases/case-amina/status').set('Authorization', `Bearer ${claimantToken}`).send({ status: 'approved' })
     expect(response.status).toBe(403)

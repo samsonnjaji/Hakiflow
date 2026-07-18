@@ -339,6 +339,10 @@ input, textarea, select { color: var(--ink); }
 .two-cols { grid-template-columns: repeat(2,1fr); }
 .full { grid-column: 1 / -1; }
 .inline-error { margin-top: 16px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent); border-radius: 9px; color: var(--danger); background: var(--danger-pale); font-size: .73rem; font-weight: 700; }
+.analysis-recovery { display: flex; gap: 12px; margin-top: 16px; padding: 15px; border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); border-radius: 12px; color: var(--accent); background: var(--accent-pale); }
+.analysis-recovery > svg { flex: 0 0 auto; margin-top: 2px; }
+.analysis-recovery strong { color: var(--ink); }
+.analysis-recovery p { margin: 4px 0 7px; color: var(--ink-muted); font-size: .7rem; }
 .upload-zone { display: grid; width: 100%; min-height: 220px; place-items: center; align-content: center; gap: 8px; padding: 25px; border: 1.5px dashed var(--border-strong); border-radius: 14px; color: var(--ink); background: var(--bg-soft); }
 .upload-zone > span { display: grid; width: 52px; height: 52px; place-items: center; border-radius: 15px; color: var(--accent); background: var(--accent-pale); }
 .upload-zone > strong { margin-top: 3px; }

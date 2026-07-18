@@ -21,6 +21,10 @@ const legalCitations: Citation[] = [
   { id: 'cite-judiciary-forms', label: 'Small Claims Court forms', source: 'Judiciary of Kenya', section: 'Official prescribed forms', url: 'https://judiciary.go.ke/download/small-claims-court-form/', proposition: 'Filing preparation should follow the current official court forms and instructions.' },
 ]
 
+function citationsForCase(caseId: string): Citation[] {
+  return legalCitations.map((citation) => ({ ...citation, id: `${caseId}:${citation.id}` }))
+}
+
 function completenessFor(record: CaseRecord) {
   const categories = new Set(record.evidence.map((item) => item.category))
   let score = 25
@@ -79,7 +83,7 @@ function deterministic(record: CaseRecord) {
     evidence,
     timeline,
     issues,
-    citations: legalCitations,
+    citations: citationsForCase(record.id),
     completeness,
     summary: isFlagship ? demoCase.summary : `Evidence-readiness assessment for a ${record.claimType.toLowerCase()} claim of KES ${record.amount.toLocaleString()} against ${record.respondentName}. Katiba organized the claimant's narrative and ${evidence.length} submitted source item${evidence.length === 1 ? '' : 's'} for human verification.`,
     nextAction: !record.respondentAddress ? 'Add the respondent service address, then request human review.' : 'Ask a paralegal or lawyer to verify the source documents and draft pack.',
@@ -151,7 +155,7 @@ async function liveAnalysis(record: CaseRecord) {
     ...record,
     timeline,
     issues,
-    citations: legalCitations,
+    citations: citationsForCase(record.id),
     summary: parsed.summary,
     nextAction: parsed.nextAction,
     completeness,

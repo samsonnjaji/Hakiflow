@@ -122,13 +122,16 @@ app.post('/api/cases', (req: AuthedRequest, res) => {
   res.status(201).json(record)
 })
 
-app.post('/api/cases/:id/analyze', async (req: AuthedRequest, res, next) => {
+app.post('/api/cases/:id/analyze', async (req: AuthedRequest, res, _next) => {
   try {
     const record = getCaseById(req.params.id)
     if (!record) return res.status(404).json({ message: 'Case not found.' })
     if (!canAccessCase(record.id, req.user!.id, req.user!.role)) return res.status(403).json({ message: 'This case is outside your workspace.' })
     res.json(saveAnalysis(await analyzeLegalCase(record)))
-  } catch (error) { next(error) }
+  } catch (error) {
+    console.error('Evidence analysis failed after the claim was saved.', error)
+    res.status(503).json({ message: 'The evidence assessment did not finish. Your saved claim is unchanged; retry analysis.', retryable: true })
+  }
 })
 
 app.post('/api/evidence/extract', evidenceUpload.single('evidence'), async (req: AuthedRequest, res, next) => {

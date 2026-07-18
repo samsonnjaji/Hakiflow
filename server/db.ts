@@ -123,23 +123,24 @@ function seed() {
 
 function checksum(input: string) { return createHash('sha256').update(input).digest('hex') }
 
-function replaceChildren(record: CaseRecord) {
+function writeChildren(record: CaseRecord) {
   const caseId = record.id
+  for (const table of ['evidence', 'timeline_events', 'legal_issues', 'citations', 'audit_log']) db.prepare(`DELETE FROM ${table} WHERE case_id = ?`).run(caseId)
+  const evidenceStatement = db.prepare('INSERT INTO evidence (id,case_id,name,mime_type,category,byte_size,extracted_text,checksum_sha256,verified,added_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
+  record.evidence.forEach((item) => evidenceStatement.run(item.id, caseId, item.name, item.type, item.category, item.size, item.extractedText ?? null, checksum(`${item.name}:${item.size}:${item.type}`), item.verified ? 1 : 0, item.addedAt))
+  const eventStatement = db.prepare('INSERT INTO timeline_events (id,case_id,event_date,title,detail,evidence_ids,confidence) VALUES (?,?,?,?,?,?,?)')
+  record.timeline.forEach((item) => eventStatement.run(item.id, caseId, item.date, item.title, item.detail, JSON.stringify(item.evidenceIds), item.confidence))
+  const issueStatement = db.prepare('INSERT INTO legal_issues (id,case_id,severity,title,detail,action) VALUES (?,?,?,?,?,?)')
+  record.issues.forEach((item) => issueStatement.run(item.id, caseId, item.severity, item.title, item.detail, item.action ?? null))
+  const citationStatement = db.prepare('INSERT INTO citations (id,case_id,label,source,section,url,proposition) VALUES (?,?,?,?,?,?,?)')
+  record.citations.forEach((item) => citationStatement.run(item.id, caseId, item.label, item.source, item.section, item.url, item.proposition))
+  const auditStatement = db.prepare('INSERT INTO audit_log (id,case_id,action,actor,detail,created_at) VALUES (?,?,?,?,?,?)')
+  record.audit.forEach((item) => auditStatement.run(item.id, caseId, item.action, item.actor, item.detail, item.createdAt))
+}
+
+function replaceChildren(record: CaseRecord) {
   db.exec('BEGIN')
-  try {
-    for (const table of ['evidence', 'timeline_events', 'legal_issues', 'citations', 'audit_log']) db.prepare(`DELETE FROM ${table} WHERE case_id = ?`).run(caseId)
-    const evidenceStatement = db.prepare('INSERT INTO evidence (id,case_id,name,mime_type,category,byte_size,extracted_text,checksum_sha256,verified,added_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
-    record.evidence.forEach((item) => evidenceStatement.run(item.id, caseId, item.name, item.type, item.category, item.size, item.extractedText ?? null, checksum(`${item.name}:${item.size}:${item.type}`), item.verified ? 1 : 0, item.addedAt))
-    const eventStatement = db.prepare('INSERT INTO timeline_events (id,case_id,event_date,title,detail,evidence_ids,confidence) VALUES (?,?,?,?,?,?,?)')
-    record.timeline.forEach((item) => eventStatement.run(item.id, caseId, item.date, item.title, item.detail, JSON.stringify(item.evidenceIds), item.confidence))
-    const issueStatement = db.prepare('INSERT INTO legal_issues (id,case_id,severity,title,detail,action) VALUES (?,?,?,?,?,?)')
-    record.issues.forEach((item) => issueStatement.run(item.id, caseId, item.severity, item.title, item.detail, item.action ?? null))
-    const citationStatement = db.prepare('INSERT INTO citations (id,case_id,label,source,section,url,proposition) VALUES (?,?,?,?,?,?,?)')
-    record.citations.forEach((item) => citationStatement.run(item.id, caseId, item.label, item.source, item.section, item.url, item.proposition))
-    const auditStatement = db.prepare('INSERT INTO audit_log (id,case_id,action,actor,detail,created_at) VALUES (?,?,?,?,?,?)')
-    record.audit.forEach((item) => auditStatement.run(item.id, caseId, item.action, item.actor, item.detail, item.createdAt))
-    db.exec('COMMIT')
-  } catch (error) { db.exec('ROLLBACK'); throw error }
+  try { writeChildren(record); db.exec('COMMIT') } catch (error) { db.exec('ROLLBACK'); throw error }
 }
 
 seed()
@@ -191,8 +192,15 @@ export function createCase(userId: string, payload: Omit<CaseRecord, 'id' | 'ref
 
 export function saveAnalysis(record: CaseRecord) {
   const now = new Date().toISOString()
-  db.prepare('UPDATE cases SET status=?,completeness=?,ai_mode=?,summary=?,next_action=?,updated_at=? WHERE id=?').run(record.status, record.completeness, record.aiMode, record.summary, record.nextAction, now, record.id)
-  replaceChildren({ ...record, updatedAt: now })
+  db.exec('BEGIN')
+  try {
+    db.prepare('UPDATE cases SET status=?,completeness=?,ai_mode=?,summary=?,next_action=?,updated_at=? WHERE id=?').run(record.status, record.completeness, record.aiMode, record.summary, record.nextAction, now, record.id)
+    writeChildren({ ...record, updatedAt: now })
+    db.exec('COMMIT')
+  } catch (error) {
+    db.exec('ROLLBACK')
+    throw error
+  }
   return getCaseById(record.id)!
 }
 
