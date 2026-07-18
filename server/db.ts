@@ -1,13 +1,28 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { demoCase, demoUsers } from '../src/data/demo'
 import type { AuditEntry, CaseRecord, Citation, DashboardStats, Evidence, LegalIssue, TimelineEvent } from '../src/types'
 
-const databasePath = process.env.DATABASE_PATH ?? resolve(process.cwd(), 'data', 'katiba-os-v2.db')
-mkdirSync(dirname(databasePath), { recursive: true })
-export const db = new DatabaseSync(databasePath)
+function openDatabase() {
+  const requestedPath = process.env.DATABASE_PATH ?? resolve(process.cwd(), 'data', 'katiba-os-v2.db')
+  try {
+    mkdirSync(dirname(requestedPath), { recursive: true })
+    return new DatabaseSync(requestedPath)
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (!['EACCES', 'EROFS'].includes(code ?? '')) throw error
+
+    const fallbackPath = resolve(tmpdir(), 'katiba-os.db')
+    console.warn(`Database path ${requestedPath} is not writable; using temporary storage at ${fallbackPath}.`)
+    mkdirSync(dirname(fallbackPath), { recursive: true })
+    return new DatabaseSync(fallbackPath)
+  }
+}
+
+export const db = openDatabase()
 db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;')
 
 db.exec(`
