@@ -57,15 +57,19 @@ class _Mark extends StatelessWidget {
   final double size;
 
   @override
-  Widget build(BuildContext context) => Container(
-    width: size,
-    height: size,
-    decoration: BoxDecoration(
-      color: KatibaColors.green,
-      borderRadius: BorderRadius.circular(size * .28),
+  Widget build(BuildContext context) => Semantics(
+    label: 'Katiba OS',
+    image: true,
+    child: ClipRRect(
+      borderRadius: BorderRadius.circular(size * .24),
+      child: Image.asset(
+        'assets/branding/katiba_app_icon.png',
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        filterQuality: FilterQuality.high,
+      ),
     ),
-    alignment: Alignment.center,
-    child: Icon(Icons.balance_rounded, color: Colors.white, size: size * .58),
   );
 }
 
@@ -118,18 +122,13 @@ class _LoginScreenState extends State<_LoginScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Row(
-                      children: [
-                        _Mark(),
-                        SizedBox(width: 14),
-                        Text(
-                          'Katiba OS',
-                          style: TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ],
+                    Image.asset(
+                      'assets/branding/katiba_wordmark.png',
+                      width: 250,
+                      height: 84,
+                      fit: BoxFit.contain,
+                      alignment: Alignment.centerLeft,
+                      filterQuality: FilterQuality.high,
                     ),
                     const SizedBox(height: 54),
                     Text(
@@ -210,11 +209,7 @@ class _LoginScreenState extends State<_LoginScreen> {
                       mainAxisAlignment: MainAxisAlignment.center,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Icon(
-                          Icons.balance_rounded,
-                          color: KatibaColors.gold,
-                          size: 58,
-                        ),
+                        const _Mark(size: 84),
                         const SizedBox(height: 28),
                         Text(
                           'Evidence in.\nAccountable legal action out.',

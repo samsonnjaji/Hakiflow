@@ -88,11 +88,11 @@ export function AppShell() {
         <header className="topbar">
           <div className="topbar-left">
             <button className="icon-button menu-button" onClick={() => setMenuOpen(true)} aria-label="Open menu"><Menu /></button>
-            <div className="mobile-logo"><Logo /></div>
+            <div className="mobile-logo"><Logo compact /></div>
           </div>
           <div className="topbar-actions">
             <span className={`connection ${online ? 'online' : ''}`}>{online ? <Wifi size={14} /> : <WifiOff size={14} />}{online ? 'Synced' : 'Offline'}</span>
-            <button className="icon-button" aria-label="Help"><CircleHelp /></button>
+            <NavLink className="icon-button" to="/app/platform" aria-label="Help and platform guide"><CircleHelp /></NavLink>
             <span className="avatar">{user?.initials}</span>
           </div>
         </header>
