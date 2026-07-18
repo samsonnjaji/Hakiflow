@@ -1,0 +1,33 @@
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import { VitePWA } from 'vite-plugin-pwa'
+
+// https://vite.dev/config/
+export default defineConfig({
+  plugins: [
+    react(),
+    VitePWA({
+      registerType: 'autoUpdate',
+      includeAssets: ['favicon.svg'],
+      manifest: {
+        name: 'Katiba OS — Intelligent Legal Infrastructure',
+        short_name: 'Katiba OS',
+        description: 'An offline-first small claims evidence and filing copilot for Kenya.',
+        theme_color: '#102a24',
+        background_color: '#f4f1e8',
+        display: 'standalone',
+        start_url: '/',
+        icons: [{ src: '/favicon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' }],
+      },
+      workbox: {
+        navigateFallback: '/index.html',
+        runtimeCaching: [{
+          urlPattern: ({ url }) => url.pathname.startsWith('/api/'),
+          handler: 'NetworkFirst',
+          options: { cacheName: 'katiba-os-api', networkTimeoutSeconds: 3 },
+        }],
+      },
+    }),
+  ],
+  server: { port: 5173, proxy: { '/api': 'http://localhost:8787' } },
+})
