@@ -16,6 +16,7 @@ const allowedStatuses = ['draft', 'analyzing', 'needs_evidence', 'ready_review',
 const configuredOrigins = (process.env.ALLOWED_ORIGINS ?? '').split(',').map((origin) => origin.trim()).filter(Boolean)
 const productionOrigins = new Set(['https://katibaos.njajisamson.workers.dev', ...configuredOrigins])
 const localOrigin = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/
+const ownedWorkerOrigin = /^https:\/\/[a-z0-9-]+\.njajisamson\.workers\.dev$/i
 const voiceUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25_000_000, files: 1 } })
 const evidenceUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25_000_000, files: 1 } })
 const sessionTtlMs = 24 * 60 * 60 * 1000
@@ -63,7 +64,9 @@ export const app = express()
 app.disable('x-powered-by')
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || localOrigin.test(origin) || productionOrigins.has(origin)) return callback(null, true)
+    const normalizedOrigin = origin?.trim().replace(/\/$/, '').toLowerCase()
+    const normalizedConfigured = normalizedOrigin && [...productionOrigins].some((allowed) => allowed.trim().replace(/\/$/, '').toLowerCase() === normalizedOrigin)
+    if (!origin || localOrigin.test(origin) || ownedWorkerOrigin.test(origin) || normalizedConfigured) return callback(null, true)
     const error = Object.assign(new Error('Origin is not allowed by Katiba OS.'), { status: 403 })
     callback(error)
   },
