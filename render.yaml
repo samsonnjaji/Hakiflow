@@ -16,7 +16,7 @@ services:
       - key: DATABASE_PATH
         value: /tmp/katiba-os.db
       - key: ALLOWED_ORIGINS
-        sync: false
+        value: https://katibaos.njajisamson.workers.dev
       - key: OPENAI_API_KEY
         sync: false
       - key: OPENAI_MODEL

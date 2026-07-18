@@ -4,6 +4,8 @@
 
 Katiba OS is a hackathon-ready legal workflow platform that turns everyday evidence into explainable, reviewable legal work. Its flagship Justice Engine guides a Kenyan small-claims user from plain-language intake to an evidence-linked preparation pack, while lawyer and paralegal workspaces add the human review gate that responsible legal AI needs.
 
+Live web application: [katibaos.njajisamson.workers.dev](https://katibaos.njajisamson.workers.dev)
+
 The same platform also demonstrates Contract, Compliance, and Evidence engines on a shared trust layer. Katiba OS is one product—not a collection of chatbots.
 
 > Katiba OS is a preparation and decision-support prototype. It does not provide final legal advice, predict case outcomes, or file documents with a court.

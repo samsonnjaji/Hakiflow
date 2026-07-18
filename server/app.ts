@@ -14,6 +14,7 @@ import type { User } from '../src/types'
 const sessionSecret = process.env.SESSION_SECRET ?? 'katiba-os-demo-secret-change-before-production'
 const allowedStatuses = ['draft', 'analyzing', 'needs_evidence', 'ready_review', 'approved'] as const
 const configuredOrigins = (process.env.ALLOWED_ORIGINS ?? '').split(',').map((origin) => origin.trim()).filter(Boolean)
+const productionOrigins = new Set(['https://katibaos.njajisamson.workers.dev', ...configuredOrigins])
 const localOrigin = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/
 const voiceUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25_000_000, files: 1 } })
 
@@ -60,8 +61,9 @@ export const app = express()
 app.disable('x-powered-by')
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || localOrigin.test(origin) || configuredOrigins.includes(origin)) return callback(null, true)
-    callback(new Error('Origin is not allowed by Katiba OS.'))
+    if (!origin || localOrigin.test(origin) || productionOrigins.has(origin)) return callback(null, true)
+    const error = Object.assign(new Error('Origin is not allowed by Katiba OS.'), { status: 403 })
+    callback(error)
   },
   credentials: false,
 }))
@@ -203,6 +205,7 @@ if (existsSync(distPath)) {
 
 app.use((_req, res) => res.status(404).json({ message: 'Route not found.' }))
 app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
-  console.error(error)
-  res.status(500).json({ message: 'Katiba OS could not complete that request. No data was lost.' })
+  const status = typeof error === 'object' && error && 'status' in error && typeof error.status === 'number' ? error.status : 500
+  if (status >= 500) console.error(error)
+  res.status(status).json({ message: status === 403 ? 'This frontend origin is not authorized.' : 'Katiba OS could not complete that request. No data was lost.' })
 })

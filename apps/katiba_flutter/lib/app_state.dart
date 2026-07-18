@@ -25,10 +25,7 @@ class AppState extends ChangeNotifier {
     if (configured.isNotEmpty) {
       return configured;
     }
-    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-      return 'http://10.0.2.2:8787';
-    }
-    return 'http://127.0.0.1:8787';
+    return 'https://katiba-os-api.onrender.com';
   }
 
   Future<void> initialize() async {

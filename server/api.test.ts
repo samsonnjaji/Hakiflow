@@ -22,6 +22,16 @@ describe('Katiba OS API', () => {
     expect(response.body.mode).toBe('safe-demo')
   })
 
+  it('allows the production Workers frontend and rejects unknown origins cleanly', async () => {
+    const allowed = await request(app).get('/api/health').set('Origin', 'https://katibaos.njajisamson.workers.dev')
+    expect(allowed.status).toBe(200)
+    expect(allowed.headers['access-control-allow-origin']).toBe('https://katibaos.njajisamson.workers.dev')
+
+    const rejected = await request(app).get('/api/health').set('Origin', 'https://untrusted.example')
+    expect(rejected.status).toBe(403)
+    expect(rejected.body.message).toBe('This frontend origin is not authorized.')
+  })
+
   it('authenticates each legal workflow role', async () => {
     const response = await request(app).get('/api/session').set('Authorization', `Bearer ${lawyerToken}`)
     expect(response.status).toBe(200)

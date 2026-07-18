@@ -25,7 +25,7 @@ The repository includes `render.yaml`.
 3. Keep the service name `katiba-os-api` or update the public URLs in the Cloudflare and Flutter configuration.
 4. Set the two secret/place-specific values Render marks as unsynchronized:
    - `OPENAI_API_KEY`: project-scoped OpenAI API key.
-   - `ALLOWED_ORIGINS`: comma-separated exact frontend origins, for example `https://katiba-os.pages.dev,https://app.katibaos.example`.
+   - `ALLOWED_ORIGINS`: exact deployed frontend origin, currently `https://katibaos.njajisamson.workers.dev`.
 5. Deploy and verify `https://<service>.onrender.com/api/health`.
 
 Render environment variables:
@@ -61,7 +61,7 @@ Cloudflare Workers build settings:
 The public production API origin is checked into `.env.production`:
 
 ```text
-VITE_API_URL=https://<your-render-service>.onrender.com
+VITE_API_URL=https://katiba-os-api.onrender.com
 ```
 
 If the Render hostname changes, update `.env.production` and `public/_headers`, then commit. Do not add `OPENAI_API_KEY` to Cloudflare. Vite variables are compiled into browser JavaScript and are public.
@@ -79,8 +79,8 @@ flutter run --dart-define=KATIBA_API_URL=http://10.0.2.2:8787
 Production build:
 
 ```powershell
-flutter build apk --release --dart-define=KATIBA_API_URL=https://<your-render-service>.onrender.com
-flutter build web --release --dart-define=KATIBA_API_URL=https://<your-render-service>.onrender.com
+flutter build apk --release --dart-define=KATIBA_API_URL=https://katiba-os-api.onrender.com
+flutter build web --release --dart-define=KATIBA_API_URL=https://katiba-os-api.onrender.com
 ```
 
 Microphone permissions are declared for Android, iOS, and macOS. Browser voice capture requires HTTPS, which Cloudflare Pages provides. The UI labels playback as an AI voice; OpenAI-generated audio must not be presented as a human recording.

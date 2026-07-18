@@ -32,12 +32,12 @@ flutter build web --release --dart-define=KATIBA_API_URL=https://katiba-os-api.o
 
 ## Production configuration
 
-Pass the public Render API origin at build time:
+Release builds default to the live Render API. The explicit command is:
 
 ```powershell
-flutter build apk --release --dart-define=KATIBA_API_URL=https://<service>.onrender.com
+flutter build apk --release --dart-define=KATIBA_API_URL=https://katiba-os-api.onrender.com
 ```
 
 Never compile `OPENAI_API_KEY` into Flutter. The app sends authenticated audio or summary text to Katiba OS; the Render API holds the key and calls OpenAI. Android, iOS, and macOS microphone declarations are included. iOS and macOS builds require Xcode on macOS; Windows builds require Visual Studio Desktop development with C++.
 
-The checked-in Android manifest allows cleartext traffic for local-emulator development. For a store release, use HTTPS only and set `android:usesCleartextTraffic="false"`.
+Release builds enforce HTTPS. Debug and profile manifests allow cleartext traffic only for local-emulator development. The included release APK uses the development signing key for hackathon side-loading; configure a private upload key before publishing to an app store.

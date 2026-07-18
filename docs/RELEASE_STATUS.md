@@ -12,7 +12,7 @@ Verified on 18 July 2026.
 - Voice: browser and Flutter microphone intake plus disclosed synthetic summary playback through the server-side OpenAI integration.
 - Documents: branded PDF action pack with download audit event.
 - Flutter: static analysis clean; 5 tests passed; Android APK and web release builds passed.
-- Deployment: zero-cost Render web-service Blueprint, Cloudflare Pages routing/headers, and environment-variable runbook included.
+- Deployment: live at `https://katibaos.njajisamson.workers.dev` with API at `https://katiba-os-api.onrender.com`.
 
 ## Generated build artifacts
 
@@ -22,6 +22,6 @@ Verified on 18 July 2026.
 
 ## Configuration still owned by the deployer
 
-No secret is embedded in the repository. Before the live presentation, set `OPENAI_API_KEY` and `ALLOWED_ORIGINS` on Render, then set `VITE_API_URL` on Cloudflare Pages. Replace the placeholder Render hostname if Render assigns a different service URL.
+No secret is embedded in the repository. `OPENAI_API_KEY` and `SESSION_SECRET` remain server-side on Render. The production frontend origin and public API origin are synchronized in the checked-in deployment configuration.
 
 The included Free Render configuration uses temporary SQLite and recreates the seeded demonstration at startup. Upgrade to a persistent disk or managed PostgreSQL, then complete the object-storage, identity, encryption, backup, rate-limit, and governance migration gate in `DEPLOYMENT.md` before real client data.
