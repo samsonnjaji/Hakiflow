@@ -51,7 +51,7 @@ function deterministic(record: CaseRecord) {
   }
   const completeness = completenessFor({ ...record, evidence })
   return {
-    ...record, evidence, timeline, issues, citations: legalCitations, completeness,
+    ...record, evidence, timeline, issues, citations: legalCitations.map((citation) => ({ ...citation, id: randomUUID() })), completeness,
     summary: isFlagship ? demoCase.summary : `A ${record.claimType.toLowerCase()} claim for KES ${record.amount.toLocaleString()} against ${record.respondentName}, based on the claimant’s statement and submitted evidence.`,
     nextAction: !record.respondentAddress ? 'Add the respondent’s service address, then request human review.' : 'Ask a paralegal to verify the facts and draft pack.',
     status: completeness >= 75 ? 'ready_review' as const : 'needs_evidence' as const,
@@ -84,7 +84,7 @@ async function liveAnalysis(record: CaseRecord) {
   const timeline = parsed.timeline.map((event) => ({ ...event, id: randomUUID(), evidenceIds: event.evidenceIds.filter((id) => evidenceIds.has(id)) }))
   const issues = parsed.issues.map((issue) => ({ ...issue, id: randomUUID() }))
   const completeness = completenessFor(record)
-  return { ...record, timeline, issues, citations: legalCitations, summary: parsed.summary, nextAction: parsed.nextAction, completeness, status: completeness >= 75 ? 'ready_review' as const : 'needs_evidence' as const, aiMode: 'openai' as const, evidence: record.evidence.map((item) => ({ ...item, verified: true })), audit: [...record.audit, { id: randomUUID(), action: 'Evidence analyzed', actor: 'Katiba AI', createdAt: now, detail: `OpenAI structured analysis completed with ${record.evidence.length} scoped evidence items.` }] }
+  return { ...record, timeline, issues, citations: legalCitations.map((citation) => ({ ...citation, id: randomUUID() })), summary: parsed.summary, nextAction: parsed.nextAction, completeness, status: completeness >= 75 ? 'ready_review' as const : 'needs_evidence' as const, aiMode: 'openai' as const, evidence: record.evidence.map((item) => ({ ...item, verified: true })), audit: [...record.audit, { id: randomUUID(), action: 'Evidence analyzed', actor: 'Katiba AI', createdAt: now, detail: `OpenAI structured analysis completed with ${record.evidence.length} scoped evidence items.` }] }
 }
 
 export async function analyzeLegalCase(record: CaseRecord): Promise<CaseRecord> {

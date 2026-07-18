@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
   BarChart3, Blocks, BriefcaseBusiness, ChevronDown, CircleHelp, FilePlus2, FolderKanban,
@@ -6,6 +6,77 @@ import {
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { Logo } from './Logo'
+
+function useClickAway(active: boolean, onAway: () => void) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!active) return
+    function onPointer(event: MouseEvent) {
+      if (ref.current && !ref.current.contains(event.target as Node)) onAway()
+    }
+    function onKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') onAway()
+    }
+    document.addEventListener('mousedown', onPointer)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onPointer)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [active, onAway])
+  return ref
+}
+
+const roleLabel = { lawyer: 'Advocate workspace', paralegal: 'Legal aid workspace', claimant: 'My justice workspace' } as const
+
+function AccountMenu({ variant, dark, setDark }: { variant: 'sidebar' | 'topbar'; dark: boolean; setDark: (value: boolean) => void }) {
+  const { user, logout } = useAuth()
+  const [open, setOpen] = useState(false)
+  const ref = useClickAway(open, () => setOpen(false))
+
+  return (
+    <div className="account-menu" ref={ref}>
+      <button
+        type="button"
+        className={variant === 'sidebar' ? 'account-menu-trigger workspace-pill' : 'account-menu-trigger icon-button'}
+        aria-haspopup="menu" aria-expanded={open} aria-label="Account menu"
+        onClick={() => setOpen((value) => !value)}
+      >
+        {variant === 'sidebar'
+          ? <><span className="avatar avatar-small">{user?.initials}</span><span><small>{user ? roleLabel[user.role] : ''}</small><strong>{user?.name}</strong></span><ChevronDown size={16} aria-hidden="true" /></>
+          : <span className="avatar">{user?.initials}</span>}
+      </button>
+      {open && (
+        <div className={`account-menu-panel ${variant === 'topbar' ? 'align-right' : ''}`} role="menu">
+          <div className="account-menu-user"><strong>{user?.name}</strong><small>{user?.email}</small></div>
+          <button role="menuitem" className="account-menu-item" onClick={() => setDark(!dark)}>{dark ? <Sun size={16} /> : <Moon size={16} />} {dark ? 'Light mode' : 'Dark mode'}</button>
+          <button role="menuitem" className="account-menu-item danger" onClick={logout}><LogOut size={16} /> Log out</button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function HelpMenu() {
+  const [open, setOpen] = useState(false)
+  const ref = useClickAway(open, () => setOpen(false))
+  return (
+    <div className="account-menu" ref={ref}>
+      <button type="button" className="icon-button" aria-haspopup="menu" aria-expanded={open} aria-label="Help" onClick={() => setOpen((value) => !value)}><CircleHelp /></button>
+      {open && (
+        <div className="help-panel" role="menu">
+          <h3>Getting around Katiba OS</h3>
+          <ul>
+            <li>Use the sidebar to switch between your workspace sections.</li>
+            <li>Your account menu (avatar, top right) has dark mode and log out.</li>
+            <li>Drafts save automatically and work offline.</li>
+            <li>Every AI output is a draft — a named human reviews before anything is filed.</li>
+          </ul>
+        </div>
+      )}
+    </div>
+  )
+}
 
 const claimantNav = [
   { to: '/app', label: 'Overview', icon: LayoutDashboard, end: true },
@@ -57,11 +128,7 @@ export function AppShell() {
           <button className="icon-button sidebar-close" onClick={() => setMenuOpen(false)} aria-label="Close menu"><X /></button>
         </div>
 
-        <div className="workspace-pill">
-          <span className="avatar avatar-small">{user?.initials}</span>
-          <span><small>{user?.role === 'lawyer' ? 'Advocate workspace' : user?.role === 'paralegal' ? 'Legal aid workspace' : 'My justice workspace'}</small><strong>{user?.name}</strong></span>
-          <ChevronDown size={16} aria-hidden="true" />
-        </div>
+        <AccountMenu variant="sidebar" dark={dark} setDark={setDark} />
 
         <nav className="side-nav">
           <p className="nav-eyebrow">Workspace</p>
@@ -92,8 +159,8 @@ export function AppShell() {
           </div>
           <div className="topbar-actions">
             <span className={`connection ${online ? 'online' : ''}`}>{online ? <Wifi size={14} /> : <WifiOff size={14} />}{online ? 'Synced' : 'Offline'}</span>
-            <button className="icon-button" aria-label="Help"><CircleHelp /></button>
-            <span className="avatar">{user?.initials}</span>
+            <HelpMenu />
+            <AccountMenu variant="topbar" dark={dark} setDark={setDark} />
           </div>
         </header>
 

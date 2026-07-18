@@ -48,8 +48,7 @@ export async function createCase(payload: IntakePayload): Promise<CaseRecord> {
 }
 
 export async function analyzeCase(id: string): Promise<CaseRecord> {
-  try { return await request(`/cases/${id}/analyze`, { method: 'POST' }) }
-  catch { return { ...demoCase, id } }
+  return request(`/cases/${id}/analyze`, { method: 'POST' })
 }
 
 export async function updateCaseStatus(id: string, status: string): Promise<CaseRecord> {
