@@ -147,6 +147,8 @@ export function CasePage() {
         {tabs.map((tab) => <button key={tab} className={activeTab === tab ? 'active' : ''} onClick={() => setParams({ tab })}>{tab === 'analysis' ? 'AI analysis' : tab[0].toUpperCase() + tab.slice(1)}{tab === 'analysis' && <span>{caseData.issues.length}</span>}</button>)}
       </nav>
 
+      <p className="ai-disclaimer" role="note"><ShieldCheck size={14} /> This page is AI-organized guidance, not legal advice. A named human reviewer approves everything before it is filed.</p>
+
       {activeTab === 'overview' && <div className="case-content-grid">
         <section className="case-main-column">
           <article className="card case-summary-card">
