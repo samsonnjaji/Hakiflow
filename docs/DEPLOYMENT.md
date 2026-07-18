@@ -47,27 +47,26 @@ The API binds to `0.0.0.0` and reads Render's `PORT` automatically.
 
 Free services sleep after inactivity and may take about a minute to wake. Open `/api/health` shortly before presenting and keep the demo focused on the seeded case.
 
-## 2. Cloudflare Pages PWA
+## 2. Cloudflare Workers Static Assets PWA
 
-Cloudflare Pages settings:
+Cloudflare Workers build settings:
 
 | Setting | Value |
 |---|---|
-| Framework preset | React (Vite) |
 | Build command | `npm ci && npm run build` |
-| Build output directory | `dist` |
+| Deploy command | `npx wrangler deploy` |
 | Root directory | repository root |
-| Node version | `24.14.0` |
+| Node version | `24.14.0` from `.node-version` |
 
-Add one public build variable:
+The public production API origin is checked into `.env.production`:
 
 ```text
 VITE_API_URL=https://<your-render-service>.onrender.com
 ```
 
-Do not add `OPENAI_API_KEY` to Cloudflare Pages. Vite variables are compiled into browser JavaScript and are public.
+If the Render hostname changes, update `.env.production` and `public/_headers`, then commit. Do not add `OPENAI_API_KEY` to Cloudflare. Vite variables are compiled into browser JavaScript and are public.
 
-The included `public/_redirects` provides SPA routing. `public/_headers` adds baseline browser security headers. If the Render hostname changes, update both `VITE_API_URL` and the hostname in `public/_headers`.
+`wrangler.toml` deploys `dist` as Workers Static Assets and enables SPA fallback routing. `public/_headers` adds baseline browser security headers.
 
 ## 3. Flutter
 
