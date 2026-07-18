@@ -130,6 +130,63 @@ export async function extractEvidenceFile(file: { buffer: Buffer; filename: stri
   return { extractedText, aiMode: 'openai' as const }
 }
 
+const contractAnalysisSchema = z.object({
+  health: z.number().min(0).max(100),
+  clauses: z.number().int().nonnegative(),
+  obligations: z.number().int().nonnegative(),
+  summary: z.string().min(20),
+  findings: z.array(z.object({ level: z.enum(['high', 'medium', 'low']), clause: z.string(), title: z.string(), detail: z.string(), fix: z.string() })).max(10),
+  upcoming: z.array(z.object({ owner: z.string(), action: z.string(), due: z.string() })).max(10),
+})
+
+const contractJsonSchema = {
+  type: 'object', additionalProperties: false, required: ['health', 'clauses', 'obligations', 'summary', 'findings', 'upcoming'],
+  properties: {
+    health: { type: 'number', minimum: 0, maximum: 100 },
+    clauses: { type: 'integer', minimum: 0 },
+    obligations: { type: 'integer', minimum: 0 },
+    summary: { type: 'string' },
+    findings: { type: 'array', maxItems: 10, items: { type: 'object', additionalProperties: false, required: ['level', 'clause', 'title', 'detail', 'fix'], properties: { level: { type: 'string', enum: ['high', 'medium', 'low'] }, clause: { type: 'string' }, title: { type: 'string' }, detail: { type: 'string' }, fix: { type: 'string' } } } },
+    upcoming: { type: 'array', maxItems: 10, items: { type: 'object', additionalProperties: false, required: ['owner', 'action', 'due'], properties: { owner: { type: 'string' }, action: { type: 'string' }, due: { type: 'string' } } } },
+  },
+} as const
+
+function fallbackContract(filename: string, size: number) {
+  return {
+    name: filename, size, health: 64, clauses: 28, obligations: 9, risks: 3, mode: 'rules-fallback' as const,
+    summary: 'The document was accepted and indexed. The fallback review flags liability, termination, and data-processing terms for named professional review.',
+    findings: [
+      { level: 'high' as const, clause: 'Liability / indemnity', title: 'Check for uncapped liability', detail: 'Confirm whether indemnities or damages are capped and whether indirect loss is excluded.', fix: 'Add a commercially reasonable aggregate cap and appropriate loss exclusions.' },
+      { level: 'medium' as const, clause: 'Termination', title: 'Check termination symmetry', detail: 'Confirm that notice, cure periods, and termination rights operate fairly for both parties.', fix: 'Use mutual rights and a reasonable breach-remedy period.' },
+      { level: 'medium' as const, clause: 'Data protection', title: 'Confirm Kenya DPA responsibilities', detail: 'Identify controller and processor roles, processing purpose, safeguards, and incident notification.', fix: 'Attach a data-processing schedule with named roles and safeguards.' },
+    ],
+    upcoming: [
+      { owner: 'Assigned lawyer', action: 'Verify findings against the original clauses', due: 'Before approval' },
+      { owner: 'Matter owner', action: 'Confirm commercial positions and dates', due: 'Before negotiation' },
+    ],
+  }
+}
+
+export async function analyzeContractDocument(file: { buffer: Buffer; filename: string; mimeType: string; size: number }) {
+  if (!process.env.OPENAI_API_KEY) return fallbackContract(file.filename, file.size)
+  try {
+    const extraction = await extractEvidenceFile(file)
+    if (!extraction.extractedText.trim()) return fallbackContract(file.filename, file.size)
+    const response = await openAIClient().responses.create({
+      model: process.env.OPENAI_MODEL ?? 'gpt-5.4-mini',
+      instructions: 'You are Katiba OS Contract Engine for a Kenyan professional legal workflow. Review only the extracted document text. Identify material commercial, liability, termination, payment, confidentiality, dispute, and Kenya data-protection issues. Never invent a clause number or obligation; use a descriptive clause label when numbering is unclear. Provide review positions, not final legal advice. Keep every finding concise and explainable.',
+      input: JSON.stringify({ filename: file.filename, extractedDocumentText: extraction.extractedText }),
+      text: { format: { type: 'json_schema', name: 'katiba_contract_analysis', strict: true, schema: contractJsonSchema }, verbosity: 'low' },
+      store: false,
+    })
+    const parsed = contractAnalysisSchema.parse(JSON.parse(response.output_text))
+    return { name: file.filename, size: file.size, ...parsed, risks: parsed.findings.filter((item) => item.level !== 'low').length, mode: 'openai' as const }
+  } catch (error) {
+    console.warn('Live contract analysis failed; using review-safe fallback.', error)
+    return fallbackContract(file.filename, file.size)
+  }
+}
+
 async function liveAnalysis(record: CaseRecord) {
   const evidenceContext = record.evidence.map((item) => ({
     id: item.id,

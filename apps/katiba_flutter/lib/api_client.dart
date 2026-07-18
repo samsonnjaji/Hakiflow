@@ -56,7 +56,7 @@ class KatibaApi {
       _ => await _client.get(uri, headers: _headers),
     };
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      String message = 'Katiba OS could not complete that request.';
+      String message = 'This step did not finish. Your form is still available; check the connection and retry.';
       try {
         final decoded = jsonDecode(response.body);
         if (decoded is Map && decoded['message'] is String) {
@@ -152,6 +152,39 @@ class KatibaApi {
     return json['text'] as String? ?? '';
   }
 
+  Future<Json> extractEvidence(
+    Uint8List bytes, {
+    required String filename,
+    required String mimeType,
+  }) async {
+    final request = http.MultipartRequest('POST', _uri('/evidence/extract'))
+      ..headers['Accept'] = 'application/json'
+      ..files.add(
+        http.MultipartFile.fromBytes(
+          'evidence',
+          bytes,
+          filename: filename,
+          contentType: MediaType.parse(mimeType),
+        ),
+      );
+    if (token != null && token!.isNotEmpty) {
+      request.headers['Authorization'] = 'Bearer $token';
+    }
+    final streamed = await _client.send(request);
+    final response = await http.Response.fromStream(streamed);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw ApiException(_message(response), statusCode: response.statusCode);
+    }
+    try {
+      return Map<String, dynamic>.from(jsonDecode(response.body) as Map);
+    } catch (_) {
+      throw const ApiException(
+        'The latest evidence service is not active yet. Deploy the newest Render commit and retry.',
+        statusCode: 502,
+      );
+    }
+  }
+
   Future<Uint8List> speak(String text) async {
     final response = await _client.post(
       _uri('/voice/speak'),
@@ -171,7 +204,7 @@ class KatibaApi {
         return decoded['message'] as String;
       }
     } catch (_) {}
-    return 'Katiba OS could not complete that request.';
+    return 'This step did not finish. Your form is still available; check the connection and retry.';
   }
 
   Uri packUri(String id) =>

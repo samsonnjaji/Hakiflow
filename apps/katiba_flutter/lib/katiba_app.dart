@@ -1,6 +1,9 @@
 import 'dart:async';
+import 'dart:typed_data';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'app_state.dart';
@@ -1233,6 +1236,24 @@ class _ActivityView extends StatelessWidget {
   );
 }
 
+class _PendingEvidence {
+  const _PendingEvidence({required this.name, required this.type, required this.category, required this.bytes, this.extractedText});
+
+  final String name;
+  final String type;
+  final String category;
+  final Uint8List bytes;
+  final String? extractedText;
+
+  Json get payload => {
+    'name': name,
+    'type': type,
+    'size': bytes.length,
+    'category': category,
+    if (extractedText?.trim().isNotEmpty ?? false) 'extractedText': extractedText,
+  };
+}
+
 class _IntakePage extends StatefulWidget {
   const _IntakePage({required this.state});
   final AppState state;
@@ -1251,7 +1272,7 @@ class _IntakePageState extends State<_IntakePage> {
   final address = TextEditingController();
   final amount = TextEditingController();
   final story = TextEditingController();
-  final evidenceName = TextEditingController(text: 'Supporting document.pdf');
+  final evidence = <_PendingEvidence>[];
   String claimType = 'Unpaid goods or services';
   String court = 'Milimani Small Claims Court';
   String language = 'en';
@@ -1259,6 +1280,7 @@ class _IntakePageState extends State<_IntakePage> {
   bool consent = false;
   bool working = false;
   bool voiceBusy = false;
+  bool evidenceBusy = false;
 
   @override
   void dispose() {
@@ -1268,7 +1290,6 @@ class _IntakePageState extends State<_IntakePage> {
       address,
       amount,
       story,
-      evidenceName,
     ]) {
       controller.dispose();
     }
@@ -1304,8 +1325,60 @@ class _IntakePageState extends State<_IntakePage> {
     }
   }
 
+  Future<void> _pickEvidence() async {
+    final result = await FilePicker.platform.pickFiles(
+      allowMultiple: true,
+      withData: true,
+      type: FileType.custom,
+      allowedExtensions: const ['pdf', 'png', 'jpg', 'jpeg', 'txt'],
+    );
+    if (result == null) return;
+    for (final file in result.files.take(20 - evidence.length)) {
+      final bytes = file.bytes;
+      if (bytes == null) continue;
+      await _addEvidence(file.name, bytes, _mimeType(file.name));
+    }
+  }
+
+  Future<void> _takeEvidencePhoto() async {
+    final photo = await ImagePicker().pickImage(source: ImageSource.camera, imageQuality: 90);
+    if (photo == null) return;
+    await _addEvidence(photo.name, await photo.readAsBytes(), 'image/jpeg');
+  }
+
+  String _mimeType(String name) {
+    final lower = name.toLowerCase();
+    if (lower.endsWith('.pdf')) return 'application/pdf';
+    if (lower.endsWith('.png')) return 'image/png';
+    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+    return 'text/plain';
+  }
+
+  Future<void> _addEvidence(String name, Uint8List bytes, String mimeType) async {
+    if (bytes.isEmpty || bytes.length > 25000000) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Evidence files must contain data and be no larger than 25 MB.')));
+      return;
+    }
+    setState(() => evidenceBusy = true);
+    String? extractedText;
+    try {
+      final result = await widget.state.api.extractEvidence(bytes, filename: name, mimeType: mimeType);
+      extractedText = result['extractedText'] as String?;
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('File added and indexed. Automatic content extraction needs the latest analysis service.')));
+      }
+    }
+    if (mounted) {
+      setState(() {
+        evidence.add(_PendingEvidence(name: name, type: mimeType, category: category, bytes: bytes, extractedText: extractedText));
+        evidenceBusy = false;
+      });
+    }
+  }
+
   Future<void> _submit() async {
-    if (!(key.currentState?.validate() ?? false) || !consent) {
+    if (!(key.currentState?.validate() ?? false) || !consent || evidence.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Complete the required details and record consent.'),
@@ -1325,14 +1398,7 @@ class _IntakePageState extends State<_IntakePage> {
         'language': language,
         'courtStation': court,
         'consent': true,
-        'evidence': [
-          {
-            'name': evidenceName.text.trim(),
-            'type': 'application/pdf',
-            'size': 12000,
-            'category': category,
-          },
-        ],
+        'evidence': evidence.map((item) => item.payload).toList(),
       });
       if (mounted) Navigator.of(context).pop(created);
     } catch (error) {
@@ -1470,11 +1536,10 @@ class _IntakePageState extends State<_IntakePage> {
                   ),
                   const SizedBox(height: 28),
                   Text(
-                    'First evidence item',
+                    'Evidence documents',
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                   const SizedBox(height: 12),
-                  _RequiredField(controller: evidenceName, label: 'File name'),
                   DropdownButtonFormField<String>(
                     initialValue: category,
                     decoration: const InputDecoration(
@@ -1498,6 +1563,46 @@ class _IntakePageState extends State<_IntakePage> {
                             .toList(),
                     onChanged: (value) => setState(() => category = value!),
                   ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      FilledButton.icon(
+                        onPressed: evidenceBusy ? null : _pickEvidence,
+                        icon: const Icon(Icons.attach_file),
+                        label: const Text('Choose files'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: evidenceBusy ? null : _takeEvidencePhoto,
+                        icon: const Icon(Icons.camera_alt_outlined),
+                        label: const Text('Use camera'),
+                      ),
+                    ],
+                  ),
+                  if (evidenceBusy) ...[
+                    const SizedBox(height: 12),
+                    const LinearProgressIndicator(),
+                    const SizedBox(height: 6),
+                    const Text('Uploading and checking evidence content…'),
+                  ],
+                  if (evidence.isEmpty && !evidenceBusy) ...[
+                    const SizedBox(height: 10),
+                    const Text('Add at least one PDF, image, or TXT evidence file.', style: TextStyle(color: KatibaColors.slate)),
+                  ],
+                  ...evidence.asMap().entries.map((entry) => Card(
+                    margin: const EdgeInsets.only(top: 10),
+                    child: ListTile(
+                      leading: Icon(entry.value.type.startsWith('image/') ? Icons.image_outlined : Icons.description_outlined),
+                      title: Text(entry.value.name),
+                      subtitle: Text('${entry.value.category} · ${(entry.value.bytes.length / 1024).toStringAsFixed(0)} KB · ${entry.value.extractedText?.isNotEmpty ?? false ? 'content analyzed' : 'indexed for review'}'),
+                      trailing: IconButton(
+                        tooltip: 'Remove evidence',
+                        icon: const Icon(Icons.close),
+                        onPressed: () => setState(() => evidence.removeAt(entry.key)),
+                      ),
+                    ),
+                  )),
                   const SizedBox(height: 18),
                   CheckboxListTile(
                     contentPadding: EdgeInsets.zero,
@@ -1514,7 +1619,7 @@ class _IntakePageState extends State<_IntakePage> {
                   ),
                   const SizedBox(height: 18),
                   FilledButton.icon(
-                    onPressed: working ? null : _submit,
+                    onPressed: working || evidenceBusy ? null : _submit,
                     icon: const Icon(Icons.arrow_forward),
                     label: const Text('Create secure case'),
                   ),

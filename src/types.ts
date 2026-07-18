@@ -101,3 +101,24 @@ export interface IntakePayload {
   evidence: Array<Pick<Evidence, 'name' | 'type' | 'size' | 'category'> & { extractedText?: string }>
   consent: boolean
 }
+
+export interface ContractFinding {
+  level: 'high' | 'medium' | 'low'
+  clause: string
+  title: string
+  detail: string
+  fix: string
+}
+
+export interface ContractAnalysis {
+  name: string
+  size: number
+  health: number
+  clauses: number
+  obligations: number
+  risks: number
+  mode: 'openai' | 'rules-fallback'
+  summary: string
+  findings: ContractFinding[]
+  upcoming: Array<{ owner: string; action: string; due: string }>
+}

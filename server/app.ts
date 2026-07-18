@@ -5,7 +5,7 @@ import cors from 'cors'
 import express, { type NextFunction, type Request, type Response } from 'express'
 import multer from 'multer'
 import { z } from 'zod'
-import { analyzeLegalCase, extractEvidenceFile } from './ai'
+import { analyzeContractDocument, analyzeLegalCase, extractEvidenceFile } from './ai'
 import { canAccessCase, createCase as createNewCase, getCaseById, getStats, getUserByRole, listCases, recordAudit, saveAnalysis, updateCaseDetails, updateStatus } from './db'
 import { buildCasePack } from './pdf'
 import { synthesizeSpeech, transcribeAudio, VoiceUnavailableError, voiceStatus } from './voice'
@@ -19,6 +19,7 @@ const localOrigin = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/
 const ownedWorkerOrigin = /^https:\/\/[a-z0-9-]+\.njajisamson\.workers\.dev$/i
 const voiceUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25_000_000, files: 1 } })
 const evidenceUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25_000_000, files: 1 } })
+const contractUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25_000_000, files: 1 } })
 const sessionTtlMs = 24 * 60 * 60 * 1000
 
 interface SessionPayload { userId: string; role: 'claimant' | 'paralegal' | 'lawyer'; exp: number }
@@ -191,6 +192,16 @@ app.get('/api/contracts/demo', (_req, res) => res.json({
   ],
 }))
 
+app.post('/api/contracts/analyze', contractUpload.single('document'), async (req: AuthedRequest, res, next) => {
+  try {
+    if (req.user!.role === 'claimant') return res.status(403).json({ message: 'A paralegal or lawyer workspace is required for contract analysis.' })
+    if (!req.file) return res.status(400).json({ message: 'Choose one PDF, DOCX, or TXT document.' })
+    const allowedTypes = new Set(['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain'])
+    if (!allowedTypes.has(req.file.mimetype)) return res.status(400).json({ message: 'Contract analysis supports PDF, DOCX, and TXT files.' })
+    res.json(await analyzeContractDocument({ buffer: req.file.buffer, filename: req.file.originalname, mimeType: req.file.mimetype, size: req.file.size }))
+  } catch (error) { next(error) }
+})
+
 app.get('/api/voice/status', (_req, res) => res.json(voiceStatus()))
 
 app.post('/api/voice/transcribe', voiceUpload.single('audio'), async (req, res, next) => {
@@ -237,5 +248,10 @@ app.use((_req, res) => res.status(404).json({ message: 'Route not found.' }))
 app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
   const status = typeof error === 'object' && error && 'status' in error && typeof error.status === 'number' ? error.status : 500
   if (status >= 500) console.error(error)
-  res.status(status).json({ message: status === 403 ? 'This frontend origin is not authorized.' : 'Katiba OS could not complete that request. No data was lost.' })
+  res.status(status).json({
+    message:
+      status === 403
+        ? 'This frontend origin is not authorized.'
+        : 'That step did not finish. Your saved work is unchanged; retry once, then confirm the latest API deployment is active.',
+  })
 })

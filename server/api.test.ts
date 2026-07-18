@@ -96,6 +96,17 @@ describe('Katiba OS API', () => {
     expect(platform.body.clients).toContain('flutter-android')
   })
 
+  it('accepts a real lawyer contract upload and returns labeled analysis', async () => {
+    const response = await request(app)
+      .post('/api/contracts/analyze')
+      .set('Authorization', `Bearer ${lawyerToken}`)
+      .attach('document', Buffer.from('Supplier agreement with payment, termination, liability and data-processing clauses.'), { filename: 'Supplier-Agreement.txt', contentType: 'text/plain' })
+    expect(response.status).toBe(200)
+    expect(response.body.name).toBe('Supplier-Agreement.txt')
+    expect(response.body.mode).toBe('rules-fallback')
+    expect(response.body.findings.length).toBeGreaterThan(0)
+  })
+
   it('reports voice configuration without exposing an API key', async () => {
     const response = await request(app).get('/api/voice/status').set('Authorization', `Bearer ${lawyerToken}`)
     expect(response.status).toBe(200)

@@ -1,4 +1,4 @@
-import type { CaseRecord, DashboardStats, IntakePayload, Role, User } from './types'
+import type { CaseRecord, ContractAnalysis, DashboardStats, IntakePayload, Role, User } from './types'
 
 const apiBase = (import.meta.env.VITE_API_URL ?? '').trim().replace(/\/$/, '')
 const API = `${apiBase}/api`
@@ -35,6 +35,9 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   Object.entries(authHeaders()).forEach(([key, value]) => headers.set(key, value))
   const response = await fetch(`${API}${path}`, { ...options, headers, cache: 'no-store' })
   if (!response.ok) throw await responseError(response)
+  if (!response.headers.get('content-type')?.includes('application/json')) {
+    throw new ApiError('The latest analysis service is not active yet. Deploy the newest Render commit and retry.', 502)
+  }
   return response.json() as Promise<T>
 }
 
@@ -78,6 +81,12 @@ export async function updateCaseDetails(id: string, details: { respondentAddress
 
 export async function updateCaseStatus(id: string, status: string): Promise<CaseRecord> {
   return request(`/cases/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) })
+}
+
+export async function analyzeContract(file: File): Promise<ContractAnalysis> {
+  const form = new FormData()
+  form.append('document', file, file.name)
+  return request('/contracts/analyze', { method: 'POST', body: form })
 }
 
 async function voiceRequest(path: string, options: RequestInit): Promise<Response> {

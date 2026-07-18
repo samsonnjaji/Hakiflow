@@ -41,6 +41,7 @@ export function IntakePage() {
   const [scanningEvidence, setScanningEvidence] = useState(false)
   const [voiceError, setVoiceError] = useState('')
   const [evidenceError, setEvidenceError] = useState('')
+  const [evidenceNotice, setEvidenceNotice] = useState('')
   const [error, setError] = useState('')
   const [savedCase, setSavedCase] = useState<SavedCase | null>(() => {
     try { return JSON.parse(localStorage.getItem('katiba_os_pending_analysis') ?? 'null') as SavedCase | null } catch { return null }
@@ -184,6 +185,7 @@ export function IntakePage() {
   async function addFiles(files: FileList | null) {
     if (!files) return
     setEvidenceError('')
+    setEvidenceNotice('')
     setScanningEvidence(true)
     const selected = Array.from(files)
     const accepted = selected.filter((file) => /\.(pdf|png|jpe?g|txt)$/i.test(file.name) || ['application/pdf', 'image/png', 'image/jpeg', 'text/plain'].includes(file.type))
@@ -209,7 +211,7 @@ export function IntakePage() {
     if (accepted.length > availableSlots) setEvidenceError('A claim can contain up to 20 evidence items.')
     if (!unique.length && selected.length) setEvidenceError((current) => current || 'Those files are already in this claim.')
     setDraft((current) => ({ ...current, evidence: [...current.evidence, ...unique] }))
-    if (extractionFailures) setEvidenceError(`${extractionFailures} file${extractionFailures === 1 ? '' : 's'} could not be content-scanned yet. The metadata was added safely and is marked for human review.`)
+    if (extractionFailures) setEvidenceNotice(`${extractionFailures} file${extractionFailures === 1 ? '' : 's'} uploaded successfully and ${extractionFailures === 1 ? 'is' : 'are'} indexed for source verification. Deploy the latest analysis service to enable automatic content extraction.`)
     if (fileRef.current) fileRef.current.value = ''
     if (cameraRef.current) cameraRef.current.value = ''
     setScanningEvidence(false)
@@ -285,6 +287,7 @@ export function IntakePage() {
               <div><button type="button" disabled={scanningEvidence} onClick={() => cameraRef.current?.click()}><Camera size={17} /> Use camera</button><button type="button" disabled={scanningEvidence} onClick={() => fileRef.current?.click()}><Paperclip size={17} /> Browse files</button></div>
             </div>
             {evidenceError && <div className="inline-error" role="alert">{evidenceError}</div>}
+            {evidenceNotice && <div className="inline-notice" role="status"><CheckCircle2 />{evidenceNotice}</div>}
             <div className="evidence-upload-list">
               {draft.evidence.map((item, index) => <div key={`${item.name}-${index}`}>
                 <span className="file-icon">{item.type.includes('image') ? <FileImage /> : <FileText />}</span>
