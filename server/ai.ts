@@ -6,8 +6,12 @@ import type { CaseRecord, Citation, LegalIssue, TimelineEvent } from '../src/typ
 
 const analysisSchema = z.object({
   summary: z.string().min(20),
-  timeline: z.array(z.object({ date: z.string(), title: z.string(), detail: z.string(), evidenceIds: z.array(z.string()), confidence: z.number().min(0).max(100) })).max(10),
-  issues: z.array(z.object({ severity: z.enum(['strength', 'attention', 'missing']), title: z.string(), detail: z.string(), action: z.string().optional() })).max(8),
+  timeline: z.array(z.object({
+    date: z.string(), title: z.string(), detail: z.string(), evidenceIds: z.array(z.string()), confidence: z.number().min(0).max(100),
+  })).max(10),
+  issues: z.array(z.object({
+    severity: z.enum(['strength', 'attention', 'missing']), title: z.string(), detail: z.string(), action: z.string().nullable(),
+  })).max(8),
   nextAction: z.string(),
 })
 
@@ -30,33 +34,58 @@ function completenessFor(record: CaseRecord) {
   return Math.min(score, 100)
 }
 
+function categoryLabel(category: string) {
+  return ({ agreement: 'Agreement or invoice', payment: 'Payment record', communication: 'Written communication', delivery: 'Delivery record', identity: 'Identity record', other: 'Supporting material' } as Record<string, string>)[category] ?? 'Supporting material'
+}
+
 function deterministic(record: CaseRecord) {
   const isFlagship = /metrobuild|111,?000|salon fittings/i.test(record.story + record.respondentName)
-  const evidence = record.evidence.map((item) => ({ ...item, verified: true }))
+  const evidence = record.evidence.map((item) => ({ ...item, verified: isFlagship || Boolean(item.extractedText?.trim()) }))
   const evidenceByCategory = (category: string) => evidence.find((item) => item.category === category)?.id
   let timeline: TimelineEvent[]
   let issues: LegalIssue[]
   if (isFlagship) {
     const idFor = (category: string, fallback: string) => evidenceByCategory(category) ?? fallback
-    timeline = demoCase.timeline.map((event) => ({ ...event, id: randomUUID(), evidenceIds: event.evidenceIds.map((id) => id === 'ev-invoice' ? idFor('agreement', id) : id === 'ev-mpesa' ? idFor('payment', id) : id === 'ev-chat' ? idFor('communication', id) : idFor('delivery', id)) }))
+    timeline = demoCase.timeline.map((event) => ({
+      ...event,
+      id: randomUUID(),
+      evidenceIds: event.evidenceIds.map((id) => id === 'ev-invoice' ? idFor('agreement', id) : id === 'ev-mpesa' ? idFor('payment', id) : id === 'ev-chat' ? idFor('communication', id) : idFor('delivery', id)),
+    }))
     issues = demoCase.issues.map((issue) => ({ ...issue, id: randomUUID() }))
   } else {
     const today = new Date().toISOString().slice(0, 10)
     timeline = [{ id: randomUUID(), date: today, title: 'Claim statement recorded', detail: record.story.slice(0, 220), evidenceIds: evidence.slice(0, 2).map((item) => item.id), confidence: 82 }]
+    const categoryIssues: LegalIssue[] = [...new Set(evidence.map((item) => item.category))].slice(0, 4).map((category) => {
+      const matching = evidence.filter((item) => item.category === category)
+      const contentRead = matching.some((item) => item.extractedText?.trim())
+      return {
+        id: randomUUID(),
+        severity: contentRead ? 'strength' : 'attention',
+        title: `${categoryLabel(category)} ${contentRead ? 'supports review' : 'is indexed'}`,
+        detail: contentRead
+          ? `Katiba analyzed extracted content from ${matching.length} ${categoryLabel(category).toLowerCase()} item${matching.length === 1 ? '' : 's'} and linked it to the narrative.`
+          : `${matching.length} file${matching.length === 1 ? '' : 's'} ${matching.length === 1 ? 'was' : 'were'} added by name and metadata. Open the source during human review to confirm its contents.`,
+      }
+    })
     issues = [
-      { id: randomUUID(), severity: 'strength', title: 'Claim amount is within the stated limit', detail: `The entered amount of KES ${record.amount.toLocaleString()} is below KES 1,000,000.` },
-      ...(evidence.length ? [{ id: randomUUID(), severity: 'strength' as const, title: 'Supporting material supplied', detail: `${evidence.length} evidence item${evidence.length === 1 ? '' : 's'} can be reviewed against the narrative.` }] : [{ id: randomUUID(), severity: 'missing' as const, title: 'No supporting material', detail: 'Add an agreement, payment record, message, receipt, or delivery record.', action: 'Add evidence' }]),
-      ...(!record.respondentAddress ? [{ id: randomUUID(), severity: 'missing' as const, title: 'Service address missing', detail: 'A reliable service address is normally needed before filing.', action: 'Add respondent address' }] : []),
+      { id: randomUUID(), severity: 'strength', title: 'Claim amount fits the stated monetary limit', detail: `The entered amount of KES ${record.amount.toLocaleString()} is below KES 1,000,000.` },
+      ...categoryIssues,
+      ...(!record.respondentAddress ? [{ id: randomUUID(), severity: 'missing' as const, title: 'Service address missing', detail: 'Add a reliable physical or postal address for serving the respondent before filing.', action: 'Add respondent address' }] : []),
     ]
   }
   const completeness = completenessFor({ ...record, evidence })
   return {
-    ...record, evidence, timeline, issues, citations: legalCitations, completeness,
-    summary: isFlagship ? demoCase.summary : `A ${record.claimType.toLowerCase()} claim for KES ${record.amount.toLocaleString()} against ${record.respondentName}, based on the claimant’s statement and submitted evidence.`,
-    nextAction: !record.respondentAddress ? 'Add the respondent’s service address, then request human review.' : 'Ask a paralegal to verify the facts and draft pack.',
+    ...record,
+    evidence,
+    timeline,
+    issues,
+    citations: legalCitations,
+    completeness,
+    summary: isFlagship ? demoCase.summary : `Evidence-readiness assessment for a ${record.claimType.toLowerCase()} claim of KES ${record.amount.toLocaleString()} against ${record.respondentName}. Katiba organized the claimant's narrative and ${evidence.length} submitted source item${evidence.length === 1 ? '' : 's'} for human verification.`,
+    nextAction: !record.respondentAddress ? 'Add the respondent service address, then request human review.' : 'Ask a paralegal or lawyer to verify the source documents and draft pack.',
     status: completeness >= 75 ? 'ready_review' as const : 'needs_evidence' as const,
     aiMode: 'demo' as const,
-    audit: [...record.audit, { id: randomUUID(), action: 'Evidence analyzed', actor: 'Katiba AI', createdAt: new Date().toISOString(), detail: `${evidence.length} evidence items organized; source files remained unchanged.` }],
+    audit: [...record.audit, { id: randomUUID(), action: 'Evidence assessed', actor: 'Katiba analysis engine', createdAt: new Date().toISOString(), detail: `${evidence.length} evidence items organized in rules-based fallback mode; source files remained unchanged.` }],
   }
 }
 
@@ -65,31 +94,79 @@ const outputJsonSchema = {
   properties: {
     summary: { type: 'string' }, nextAction: { type: 'string' },
     timeline: { type: 'array', maxItems: 10, items: { type: 'object', additionalProperties: false, required: ['date', 'title', 'detail', 'evidenceIds', 'confidence'], properties: { date: { type: 'string' }, title: { type: 'string' }, detail: { type: 'string' }, evidenceIds: { type: 'array', items: { type: 'string' } }, confidence: { type: 'number', minimum: 0, maximum: 100 } } } },
-    issues: { type: 'array', maxItems: 8, items: { type: 'object', additionalProperties: false, required: ['severity', 'title', 'detail'], properties: { severity: { type: 'string', enum: ['strength', 'attention', 'missing'] }, title: { type: 'string' }, detail: { type: 'string' }, action: { type: 'string' } } } },
+    issues: { type: 'array', maxItems: 8, items: { type: 'object', additionalProperties: false, required: ['severity', 'title', 'detail', 'action'], properties: { severity: { type: 'string', enum: ['strength', 'attention', 'missing'] }, title: { type: 'string' }, detail: { type: 'string' }, action: { type: ['string', 'null'] } } } },
   },
+} as const
+
+function openAIClient() {
+  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+}
+
+export async function extractEvidenceFile(file: { buffer: Buffer; filename: string; mimeType: string }) {
+  if (file.mimeType === 'text/plain' || /\.txt$/i.test(file.filename)) {
+    return { extractedText: file.buffer.toString('utf8').slice(0, 30_000), aiMode: 'local' as const }
+  }
+  if (!process.env.OPENAI_API_KEY) {
+    return { extractedText: '', aiMode: 'demo' as const, message: 'OpenAI is not configured, so the file was indexed by metadata for human review.' }
+  }
+
+  const isImage = file.mimeType.startsWith('image/')
+  const encoded = file.buffer.toString('base64')
+  const content = isImage
+    ? [{ type: 'input_text' as const, text: 'Extract only the visible evidence facts: parties, dates, amounts, reference numbers, promises, signatures, and delivery/payment status. Clearly state unreadable or uncertain text. Do not give legal advice or predict a case outcome.' }, { type: 'input_image' as const, image_url: `data:${file.mimeType};base64,${encoded}`, detail: 'high' as const }]
+    : [{ type: 'input_text' as const, text: 'Extract only the evidence facts from this document: parties, dates, amounts, reference numbers, promises, signatures, and delivery/payment status. Clearly state unreadable or uncertain content. Do not give legal advice or predict a case outcome.' }, { type: 'input_file' as const, filename: file.filename, file_data: encoded }]
+
+  const response = await openAIClient().responses.create({
+    model: process.env.OPENAI_MODEL ?? 'gpt-5.4-mini',
+    input: [{ role: 'user', content }],
+    store: false,
+  })
+  const extractedText = response.output_text.trim().slice(0, 30_000)
+  if (!extractedText) throw new Error('The evidence file did not contain readable content.')
+  return { extractedText, aiMode: 'openai' as const }
 }
 
 async function liveAnalysis(record: CaseRecord) {
-  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-  const evidenceContext = record.evidence.map((item) => ({ id: item.id, name: item.name, category: item.category, extractedText: item.extractedText ?? 'No extracted text available' }))
-  const response = await client.responses.create({
+  const evidenceContext = record.evidence.map((item) => ({
+    id: item.id,
+    name: item.name,
+    category: item.category,
+    contentStatus: item.extractedText?.trim() ? 'content extracted' : 'metadata only — do not infer contents',
+    extractedText: item.extractedText?.trim() || null,
+  }))
+  const response = await openAIClient().responses.create({
     model: process.env.OPENAI_MODEL ?? 'gpt-5.4-mini',
-    instructions: `You are the evidence-organization component of Katiba OS for a Kenyan legal aid workflow. Organize only facts explicitly present in the supplied narrative and evidence metadata. Never predict success, invent a date, claim a document proves something its text does not show, or give final legal advice. Use calm plain language. Timeline evidenceIds must use only supplied IDs. If a fact is missing, surface it as a missing issue. Do not cite laws; vetted citations are attached separately by the application.`,
-    input: JSON.stringify({ claimantName: record.claimantName, respondentName: record.respondentName, amountKES: record.amount, claimType: record.claimType, story: record.story, respondentAddress: record.respondentAddress, evidence: evidenceContext }),
+    instructions: `You are Katiba OS's evidence-readiness analyst for a Kenyan legal-aid workflow. Give a useful, neutral assessment of how the submitted evidence supports the claimant's narrative. Identify strengths, inconsistencies, missing proof, and the single best next action. Organize only facts explicitly present in the narrative or extracted evidence. Metadata-only files may be listed but never treated as proof of their contents. Never provide a win probability or promise a court outcome: courts decide credibility, admissibility, law, and disputed facts. Never invent dates or facts, and do not give final legal advice. Use calm plain language. Timeline evidenceIds must use only supplied IDs. When an issue has no UI action, set action to null. Do not cite law; vetted citations are attached separately by the application.`,
+    input: JSON.stringify({ claimantName: record.claimantName, respondentName: record.respondentName, amountKES: record.amount, claimType: record.claimType, story: record.story, respondentAddress: record.respondentAddress || null, evidence: evidenceContext }),
     text: { format: { type: 'json_schema', name: 'katiba_case_analysis', strict: true, schema: outputJsonSchema }, verbosity: 'low' },
+    store: false,
   })
   const parsed = analysisSchema.parse(JSON.parse(response.output_text))
   const now = new Date().toISOString()
   const evidenceIds = new Set(record.evidence.map((item) => item.id))
   const timeline = parsed.timeline.map((event) => ({ ...event, id: randomUUID(), evidenceIds: event.evidenceIds.filter((id) => evidenceIds.has(id)) }))
-  const issues = parsed.issues.map((issue) => ({ ...issue, id: randomUUID() }))
+  const issues = parsed.issues.map(({ action, ...issue }) => ({ ...issue, id: randomUUID(), ...(action ? { action } : {}) }))
   const completeness = completenessFor(record)
-  return { ...record, timeline, issues, citations: legalCitations, summary: parsed.summary, nextAction: parsed.nextAction, completeness, status: completeness >= 75 ? 'ready_review' as const : 'needs_evidence' as const, aiMode: 'openai' as const, evidence: record.evidence.map((item) => ({ ...item, verified: true })), audit: [...record.audit, { id: randomUUID(), action: 'Evidence analyzed', actor: 'Katiba AI', createdAt: now, detail: `OpenAI structured analysis completed with ${record.evidence.length} scoped evidence items.` }] }
+  return {
+    ...record,
+    timeline,
+    issues,
+    citations: legalCitations,
+    summary: parsed.summary,
+    nextAction: parsed.nextAction,
+    completeness,
+    status: completeness >= 75 ? 'ready_review' as const : 'needs_evidence' as const,
+    aiMode: 'openai' as const,
+    evidence: record.evidence.map((item) => ({ ...item, verified: Boolean(item.extractedText?.trim()) })),
+    audit: [...record.audit, { id: randomUUID(), action: 'Evidence assessed', actor: 'Katiba AI', createdAt: now, detail: `OpenAI structured analysis completed with ${record.evidence.length} scoped evidence items.` }],
+  }
 }
 
 export async function analyzeLegalCase(record: CaseRecord): Promise<CaseRecord> {
   if (!process.env.OPENAI_API_KEY) return deterministic(record)
-  try { return await liveAnalysis(record) } catch (error) {
+  try {
+    return await liveAnalysis(record)
+  } catch (error) {
     console.warn('Live AI analysis failed; using deterministic safe mode.', error)
     return deterministic(record)
   }

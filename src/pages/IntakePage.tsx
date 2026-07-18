@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, ArrowRight, Camera, Check, FileImage, FileText, LockKeyhole, Mic2, Paperclip, Sparkles, UploadCloud, X } from 'lucide-react'
-import { analyzeCase, createCase, transcribeVoice } from '../api'
+import { analyzeCase, createCase, extractEvidence, transcribeVoice } from '../api'
 import { PageHeader } from '../components/AppShell'
 import { useAuth } from '../context/AuthContext'
 import type { Evidence, IntakePayload } from '../types'
@@ -28,6 +28,8 @@ export function IntakePage() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const fileRef = useRef<HTMLInputElement>(null)
+  const cameraRef = useRef<HTMLInputElement>(null)
+  const recognitionRef = useRef<BrowserSpeechRecognition | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const mediaStreamRef = useRef<MediaStream | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
@@ -35,7 +37,9 @@ export function IntakePage() {
   const [analyzing, setAnalyzing] = useState(false)
   const [listening, setListening] = useState(false)
   const [transcribing, setTranscribing] = useState(false)
+  const [scanningEvidence, setScanningEvidence] = useState(false)
   const [voiceError, setVoiceError] = useState('')
+  const [evidenceError, setEvidenceError] = useState('')
   const [error, setError] = useState('')
   const [draft, setDraft] = useState<Draft>(() => {
     const saved = localStorage.getItem('katiba_os_intake_draft')
@@ -49,14 +53,21 @@ export function IntakePage() {
       mediaRecorderRef.current.stop()
     }
     mediaStreamRef.current?.getTracks().forEach((track) => track.stop())
+    recognitionRef.current?.abort()
   }, [])
   const progress = step * 25
   const canContinue = useMemo(() => {
     if (step === 1) return draft.story.trim().length >= 40
-    if (step === 2) return !!draft.respondentName && draft.amount > 0 && draft.amount <= 1_000_000
-    if (step === 3) return draft.evidence.length > 0
+    if (step === 2) return draft.claimantName.trim().length >= 2 && draft.respondentName.trim().length >= 2 && draft.amount > 0 && draft.amount <= 1_000_000 && draft.claimType.trim().length >= 3 && draft.courtStation.trim().length >= 2
+    if (step === 3) return draft.evidence.length > 0 && draft.evidence.length <= 20 && draft.evidence.every((item) => item.size > 0 && item.size <= 25_000_000)
     return draft.consent
   }, [draft, step])
+  const stepRequirement = useMemo(() => {
+    if (step === 1) return 'Enter at least 40 characters, or use Speak instead.'
+    if (step === 2) return 'Add your name, the respondent, and an amount from KES 1 to KES 1,000,000.'
+    if (step === 3) return 'Add at least one supported evidence file (maximum 25 MB each).'
+    return 'Confirm consent before starting the evidence analysis.'
+  }, [step])
 
   function update<K extends keyof Draft>(key: K, value: Draft[K]) { setDraft((current) => ({ ...current, [key]: value })) }
 
@@ -75,11 +86,44 @@ export function IntakePage() {
 
   async function toggleVoice() {
     if (listening) {
-      mediaRecorderRef.current?.stop()
+      if (recognitionRef.current) recognitionRef.current.stop()
+      else mediaRecorderRef.current?.stop()
       return
     }
 
     setVoiceError('')
+    const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition
+    if (Recognition) {
+      const recognition = new Recognition()
+      recognitionRef.current = recognition
+      recognition.lang = draft.language === 'sw' ? 'sw-KE' : 'en-KE'
+      recognition.continuous = true
+      recognition.interimResults = true
+      let transcript = ''
+      recognition.onresult = (event) => {
+        for (let index = event.resultIndex; index < event.results.length; index += 1) {
+          if (event.results[index].isFinal) transcript += `${event.results[index][0].transcript} `
+        }
+      }
+      recognition.onerror = (event) => {
+        recognitionRef.current = null
+        setListening(false)
+        setVoiceError(event.error === 'not-allowed'
+          ? 'Microphone permission was denied. Allow it in the browser and try again.'
+          : 'Browser speech recognition stopped. Please try once more or type your story.')
+      }
+      recognition.onend = () => {
+        recognitionRef.current = null
+        setListening(false)
+        if (transcript.trim()) {
+          setDraft((current) => ({ ...current, story: [current.story.trim(), transcript.trim()].filter(Boolean).join('\n\n') }))
+        }
+      }
+      recognition.start()
+      setListening(true)
+      return
+    }
+
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
       setVoiceError('This browser does not support microphone recording. You can still type or use the Flutter app.')
       return
@@ -133,10 +177,38 @@ export function IntakePage() {
     }
   }
 
-  function addFiles(files: FileList | null) {
+  async function addFiles(files: FileList | null) {
     if (!files) return
-    const next = Array.from(files).map((file) => ({ name: file.name, type: file.type || 'application/octet-stream', size: file.size, category: inferCategory(file.name) }))
-    update('evidence', [...draft.evidence, ...next])
+    setEvidenceError('')
+    setScanningEvidence(true)
+    const selected = Array.from(files)
+    const accepted = selected.filter((file) => /\.(pdf|png|jpe?g|txt)$/i.test(file.name) || ['application/pdf', 'image/png', 'image/jpeg', 'text/plain'].includes(file.type))
+    if (accepted.length !== selected.length) setEvidenceError('Some files were skipped. Use PDF, PNG, JPG, JPEG, or TXT.')
+    const availableSlots = Math.max(0, 20 - draft.evidence.length)
+    let extractionFailures = 0
+    const next = await Promise.all(accepted.slice(0, availableSlots).map(async (file) => {
+      if (file.size <= 0 || file.size > 25_000_000) return null
+      let extractedText: string | undefined
+      try {
+        extractedText = file.type === 'text/plain' || /\.txt$/i.test(file.name)
+          ? (await file.text()).slice(0, 30_000)
+          : (await extractEvidence(file)).extractedText || undefined
+      } catch {
+        extractionFailures += 1
+      }
+      return { name: file.name, type: file.type || 'application/octet-stream', size: file.size, category: inferCategory(file.name), extractedText }
+    }))
+    const valid = next.filter((item): item is NonNullable<typeof item> => Boolean(item))
+    const existing = new Set(draft.evidence.map((item) => `${item.name}:${item.size}`))
+    const unique = valid.filter((item) => !existing.has(`${item.name}:${item.size}`))
+    if (valid.length !== next.length) setEvidenceError('Files must contain data and be no larger than 25 MB each.')
+    if (accepted.length > availableSlots) setEvidenceError('A claim can contain up to 20 evidence items.')
+    if (!unique.length && selected.length) setEvidenceError((current) => current || 'Those files are already in this claim.')
+    setDraft((current) => ({ ...current, evidence: [...current.evidence, ...unique] }))
+    if (extractionFailures) setEvidenceError(`${extractionFailures} file${extractionFailures === 1 ? '' : 's'} could not be content-scanned yet. The metadata was added safely and is marked for human review.`)
+    if (fileRef.current) fileRef.current.value = ''
+    if (cameraRef.current) cameraRef.current.value = ''
+    setScanningEvidence(false)
   }
 
   async function finish() {
@@ -193,13 +265,18 @@ export function IntakePage() {
 
           {step === 3 && <div className="step-panel">
             <span className="step-eyebrow">Step 3 of 4</span><h2>Add what supports your story.</h2><p>Useful evidence includes invoices, M-Pesa records, chats, receipts, and signed delivery notes.</p>
-            <input ref={fileRef} className="visually-hidden" type="file" multiple accept="image/*,.pdf,.txt" onChange={(e) => addFiles(e.target.files)} />
-            <button className="upload-zone" onClick={() => fileRef.current?.click()}><span><UploadCloud /></span><strong>Choose evidence files</strong><small>PDF, PNG, JPG, or TXT · files remain unchanged</small><div><span><Camera size={17} /> Use camera</span><span><Paperclip size={17} /> Browse files</span></div></button>
+            <input ref={fileRef} className="visually-hidden" type="file" multiple accept="image/png,image/jpeg,application/pdf,text/plain,.pdf,.txt" onChange={(e) => void addFiles(e.target.files)} />
+            <input ref={cameraRef} className="visually-hidden" type="file" accept="image/*" capture="environment" onChange={(e) => void addFiles(e.target.files)} />
+            <div className="upload-zone" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); void addFiles(event.dataTransfer.files) }}>
+              <span><UploadCloud /></span><strong>{scanningEvidence ? 'Reading evidence content…' : 'Choose or drop evidence files'}</strong><small>PDF, PNG, JPG, or TXT · maximum 25 MB each</small>
+              <div><button type="button" disabled={scanningEvidence} onClick={() => cameraRef.current?.click()}><Camera size={17} /> Use camera</button><button type="button" disabled={scanningEvidence} onClick={() => fileRef.current?.click()}><Paperclip size={17} /> Browse files</button></div>
+            </div>
+            {evidenceError && <div className="inline-error" role="alert">{evidenceError}</div>}
             <div className="evidence-upload-list">
               {draft.evidence.map((item, index) => <div key={`${item.name}-${index}`}>
                 <span className="file-icon">{item.type.includes('image') ? <FileImage /> : <FileText />}</span>
                 <p><strong>{item.name}</strong><small>{item.category} · {(item.size / 1024).toFixed(0)} KB</small></p>
-                <span className="scan-complete"><Sparkles size={14} /> Ready</span>
+                <span className="scan-complete"><Sparkles size={14} /> {item.extractedText ? 'Content analyzed' : 'Indexed for review'}</span>
                 <button className="icon-button" aria-label={`Remove ${item.name}`} onClick={() => update('evidence', draft.evidence.filter((_, i) => i !== index))}><X /></button>
               </div>)}
               {!draft.evidence.length && <div className="empty-upload"><FileText /><p><strong>No evidence added yet</strong><small>Add at least one item to continue.</small></p></div>}
@@ -211,14 +288,15 @@ export function IntakePage() {
             <div className="review-summary">
               <div><small>Claimant</small><strong>{draft.claimantName}</strong></div><div><small>Respondent</small><strong>{draft.respondentName}</strong></div><div><small>Amount</small><strong>KES {draft.amount.toLocaleString()}</strong></div><div><small>Evidence</small><strong>{draft.evidence.length} items</strong></div>
             </div>
-            <div className="ai-will-do"><div><Sparkles /></div><p><strong>What the AI will do</strong><span>Extract dates, amounts, parties, and promises</span><span>Build an evidence-linked timeline</span><span>Check basic Small Claims Court eligibility</span><span>Show its sources and confidence</span></p></div>
+            <div className="ai-will-do"><div><Sparkles /></div><p><strong>What the AI will do</strong><span>Read supported evidence content and flag unreadable files</span><span>Extract dates, amounts, parties, and promises</span><span>Build an evidence-linked timeline</span><span>Show strengths, gaps, sources, and confidence</span></p></div>
             <label className="consent-check"><input type="checkbox" checked={draft.consent} onChange={(e) => update('consent', e.target.checked)} /><span><Check /></span><p><strong>I consent to this evidence being analyzed for this claim.</strong><small>I understand the result is guidance and a draft for human review, not legal representation or a court decision.</small></p></label>
             {error && <div className="inline-error" role="alert">{error}</div>}
           </div>}
 
           <footer className="step-footer">
             <button className="button button-quiet" onClick={() => step > 1 ? setStep(step - 1) : navigate('/app')}><ArrowLeft size={18} /> {step > 1 ? 'Back' : 'Cancel'}</button>
-            {step < 4 ? <button className="button button-primary" disabled={!canContinue} onClick={() => setStep(step + 1)}>Continue <ArrowRight size={18} /></button> : <button className="button button-primary analyze-button" disabled={!canContinue || analyzing} onClick={finish}>{analyzing ? <><span className="spinner" /> Building evidence graph…</> : <><Sparkles size={18} /> Analyze my case</>}</button>}
+            {!canContinue && <span className="step-requirement">{stepRequirement}</span>}
+            {step < 4 ? <button className="button button-primary" disabled={!canContinue || scanningEvidence} onClick={() => setStep(step + 1)}>Continue <ArrowRight size={18} /></button> : <button className="button button-primary analyze-button" disabled={!canContinue || analyzing || scanningEvidence} onClick={finish}>{analyzing ? <><span className="spinner" /> Building evidence graph…</> : <><Sparkles size={18} /> Analyze my evidence</>}</button>}
           </footer>
         </section>
       </div>

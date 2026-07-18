@@ -6,14 +6,18 @@ import { useAuth } from '../context/AuthContext'
 import type { Role } from '../types'
 
 export function LoginPage() {
-  const { login, loading } = useAuth()
+  const { login, loading, error } = useAuth()
   const navigate = useNavigate()
   const [activeRole, setActiveRole] = useState<Role | null>(null)
 
   async function enter(role: Role) {
     setActiveRole(role)
-    await login(role)
-    navigate(role === 'paralegal' ? '/app/review' : '/app')
+    try {
+      await login(role)
+      navigate(role === 'paralegal' || role === 'lawyer' ? '/app/review' : '/app')
+    } catch {
+      setActiveRole(null)
+    }
   }
 
   return (
@@ -39,6 +43,7 @@ export function LoginPage() {
               {loading && activeRole === 'lawyer' ? <span className="spinner" /> : 'Open lawyer workspace'}
             </button>
           </div>
+          {error && <div className="inline-error" role="alert">{error} Please try again after the API is available.</div>}
           <div className="hero-trust-row">
             <span><ShieldCheck size={17} /> Privacy-first controls</span>
             <span><LockKeyhole size={17} /> Human review required</span>

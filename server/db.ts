@@ -196,6 +196,16 @@ export function saveAnalysis(record: CaseRecord) {
   return getCaseById(record.id)!
 }
 
+export function updateCaseDetails(id: string, details: { respondentAddress: string }, actor: string) {
+  const now = new Date().toISOString()
+  const changed = db.prepare('UPDATE cases SET respondent_address=?,updated_at=? WHERE id=?').run(details.respondentAddress, now, id)
+  if (changed.changes === 0) return null
+  db.prepare('INSERT INTO audit_log (id,case_id,action,actor,detail,created_at) VALUES (?,?,?,?,?,?)').run(
+    randomUUID(), id, 'Respondent service address updated', actor, 'The service address was added to the draft and will be included in the next evidence assessment.', now,
+  )
+  return getCaseById(id)
+}
+
 export function updateStatus(id: string, status: CaseRecord['status'], actor: string) {
   const now = new Date().toISOString()
   const changed = db.prepare('UPDATE cases SET status=?,updated_at=? WHERE id=?').run(status, now, id)

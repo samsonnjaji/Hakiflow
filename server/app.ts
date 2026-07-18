@@ -5,8 +5,8 @@ import cors from 'cors'
 import express, { type NextFunction, type Request, type Response } from 'express'
 import multer from 'multer'
 import { z } from 'zod'
-import { analyzeLegalCase } from './ai'
-import { canAccessCase, createCase as createNewCase, getCaseById, getStats, getUserByRole, listCases, recordAudit, saveAnalysis, updateStatus } from './db'
+import { analyzeLegalCase, extractEvidenceFile } from './ai'
+import { canAccessCase, createCase as createNewCase, getCaseById, getStats, getUserByRole, listCases, recordAudit, saveAnalysis, updateCaseDetails, updateStatus } from './db'
 import { buildCasePack } from './pdf'
 import { synthesizeSpeech, transcribeAudio, VoiceUnavailableError, voiceStatus } from './voice'
 import type { User } from '../src/types'
@@ -17,6 +17,8 @@ const configuredOrigins = (process.env.ALLOWED_ORIGINS ?? '').split(',').map((or
 const productionOrigins = new Set(['https://katibaos.njajisamson.workers.dev', ...configuredOrigins])
 const localOrigin = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/
 const voiceUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25_000_000, files: 1 } })
+const evidenceUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25_000_000, files: 1 } })
+const sessionTtlMs = 24 * 60 * 60 * 1000
 
 interface SessionPayload { userId: string; role: 'claimant' | 'paralegal' | 'lawyer'; exp: number }
 interface AuthedRequest extends Request { session?: SessionPayload; user?: User }
@@ -83,13 +85,17 @@ app.post('/api/auth/demo', (req, res) => {
   if (!role.success) return res.status(400).json({ message: 'Choose a valid demo role.' })
   const row = getUserByRole(role.data)
   if (!row) return res.status(500).json({ message: 'Demo user is unavailable.' })
-  const token = signToken({ userId: row.id, role: role.data, exp: Date.now() + 8 * 60 * 60 * 1000 })
+  const token = signToken({ userId: row.id, role: role.data, exp: Date.now() + sessionTtlMs })
   res.json({ token, user: { id: row.id, name: row.name, email: row.email, role: row.role, initials: row.initials } })
 })
 
 app.use('/api', authenticate)
 
-app.get('/api/session', (req: AuthedRequest, res) => res.json({ user: req.user }))
+app.get('/api/session', (req: AuthedRequest, res) => res.json({
+  token: signToken({ userId: req.user!.id, role: req.user!.role, exp: Date.now() + sessionTtlMs }),
+  user: req.user,
+}))
+app.get('/api/ai/status', (_req, res) => res.json({ enabled: Boolean(process.env.OPENAI_API_KEY), model: process.env.OPENAI_MODEL ?? 'gpt-5.4-mini' }))
 app.get('/api/cases', (req: AuthedRequest, res) => res.json(listCases(req.user!.id, req.user!.role)))
 app.get('/api/cases/:id', (req: AuthedRequest, res) => {
   const record = getCaseById(req.params.id)
@@ -120,6 +126,24 @@ app.post('/api/cases/:id/analyze', async (req: AuthedRequest, res, next) => {
     if (!canAccessCase(record.id, req.user!.id, req.user!.role)) return res.status(403).json({ message: 'This case is outside your workspace.' })
     res.json(saveAnalysis(await analyzeLegalCase(record)))
   } catch (error) { next(error) }
+})
+
+app.post('/api/evidence/extract', evidenceUpload.single('evidence'), async (req: AuthedRequest, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: 'Attach one PDF, image, or text evidence file.' })
+    const allowed = req.file.mimetype === 'application/pdf' || req.file.mimetype === 'text/plain' || req.file.mimetype === 'image/png' || req.file.mimetype === 'image/jpeg'
+    if (!allowed) return res.status(400).json({ message: 'Evidence extraction supports PDF, PNG, JPG, JPEG, and TXT.' })
+    res.json(await extractEvidenceFile({ buffer: req.file.buffer, filename: req.file.originalname, mimeType: req.file.mimetype }))
+  } catch (error) { next(error) }
+})
+
+app.patch('/api/cases/:id/details', (req: AuthedRequest, res) => {
+  const record = getCaseById(req.params.id)
+  if (!record) return res.status(404).json({ message: 'Case not found.' })
+  if (!canAccessCase(record.id, req.user!.id, req.user!.role)) return res.status(403).json({ message: 'This case is outside your workspace.' })
+  const parsed = z.object({ respondentAddress: z.string().trim().min(5).max(240) }).safeParse(req.body)
+  if (!parsed.success) return res.status(400).json({ message: 'Enter a usable respondent service address.' })
+  res.json(updateCaseDetails(record.id, parsed.data, req.user!.name))
 })
 
 app.patch('/api/cases/:id/status', (req: AuthedRequest, res) => {

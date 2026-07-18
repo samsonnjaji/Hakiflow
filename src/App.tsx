@@ -18,7 +18,8 @@ function LazyPage({ children }: { children: React.ReactNode }) {
 }
 
 function ProtectedLayout() {
-  const { user } = useAuth()
+  const { user, loading } = useAuth()
+  if (loading) return <div className="route-loading" role="status"><span className="spinner" /> Restoring secure session…</div>
   return user ? <AppShell /> : <Navigate to="/" replace />
 }
 
@@ -28,7 +29,8 @@ function RoleHome() {
 }
 
 function PublicHome() {
-  const { user } = useAuth()
+  const { user, loading } = useAuth()
+  if (loading) return <div className="route-loading" role="status"><span className="spinner" /> Checking secure session…</div>
   return user ? <Navigate to={user.role !== 'claimant' ? '/app/review' : '/app'} replace /> : <LoginPage />
 }
 

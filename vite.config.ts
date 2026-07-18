@@ -23,8 +23,7 @@ export default defineConfig({
         navigateFallback: '/index.html',
         runtimeCaching: [{
           urlPattern: ({ url }) => url.pathname.startsWith('/api/'),
-          handler: 'NetworkFirst',
-          options: { cacheName: 'katiba-os-api', networkTimeoutSeconds: 3 },
+          handler: 'NetworkOnly',
         }],
       },
     }),

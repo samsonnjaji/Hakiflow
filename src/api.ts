@@ -1,55 +1,79 @@
-import { demoCase, demoStats, demoUsers } from './data/demo'
 import type { CaseRecord, DashboardStats, IntakePayload, Role, User } from './types'
 
-const API = `${(import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '')}/api`
+const apiBase = (import.meta.env.VITE_API_URL ?? '').trim().replace(/\/$/, '')
+const API = `${apiBase}/api`
+
+export const SESSION_EXPIRED_EVENT = 'katiba:session-expired'
+
+export class ApiError extends Error {
+  readonly status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.status = status
+    this.name = 'ApiError'
+  }
+}
 
 function authHeaders(): Record<string, string> {
   const token = localStorage.getItem('katiba_os_token')
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
+async function responseError(response: Response) {
+  const payload = await response.json().catch(() => null) as { message?: string } | null
+  const message = payload?.message ?? `Request failed (${response.status})`
+  if (response.status === 401) {
+    window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT, { detail: message }))
+  }
+  return new ApiError(message, response.status)
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers)
-  headers.set('Content-Type', 'application/json')
+  if (options.body && !(options.body instanceof FormData)) headers.set('Content-Type', 'application/json')
   Object.entries(authHeaders()).forEach(([key, value]) => headers.set(key, value))
-  const response = await fetch(`${API}${path}`, {
-    ...options,
-    headers,
-  })
-  if (!response.ok) throw new Error((await response.json().catch(() => null))?.message ?? 'Request failed')
+  const response = await fetch(`${API}${path}`, { ...options, headers, cache: 'no-store' })
+  if (!response.ok) throw await responseError(response)
   return response.json() as Promise<T>
 }
 
 export async function login(role: Role): Promise<{ token: string; user: User }> {
-  try { return await request('/auth/demo', { method: 'POST', body: JSON.stringify({ role }) }) }
-  catch { return { token: `offline-${role}`, user: demoUsers[role] } }
+  return request('/auth/demo', { method: 'POST', body: JSON.stringify({ role }) })
+}
+
+export async function getSession(): Promise<{ token?: string; user: User }> {
+  return request('/session')
 }
 
 export async function getCases(): Promise<CaseRecord[]> {
-  try { return await request('/cases') } catch { return [demoCase] }
+  return request('/cases')
 }
 
 export async function getCase(id: string): Promise<CaseRecord> {
-  try { return await request(`/cases/${id}`) } catch { return { ...demoCase, id } }
+  return request(`/cases/${id}`)
 }
 
 export async function getStats(): Promise<DashboardStats> {
-  try { return await request('/stats') } catch { return demoStats }
+  return request('/stats')
 }
 
 export async function createCase(payload: IntakePayload): Promise<CaseRecord> {
-  try { return await request('/cases', { method: 'POST', body: JSON.stringify(payload) }) }
-  catch {
-    const now = new Date().toISOString()
-    const offline: CaseRecord = { ...demoCase, id: `offline-${Date.now()}`, reference: 'KO-OFFLINE-DRAFT', ...payload, evidence: payload.evidence.map((item, index) => ({ ...item, id: `offline-evidence-${index}`, addedAt: now, verified: false })), status: 'draft' }
-    localStorage.setItem('katiba_os_offline_case', JSON.stringify(offline))
-    return offline
-  }
+  return request('/cases', { method: 'POST', body: JSON.stringify(payload) })
 }
 
 export async function analyzeCase(id: string): Promise<CaseRecord> {
-  try { return await request(`/cases/${id}/analyze`, { method: 'POST' }) }
-  catch { return { ...demoCase, id } }
+  return request(`/cases/${id}/analyze`, { method: 'POST' })
+}
+
+export async function extractEvidence(file: File): Promise<{ extractedText: string; aiMode: 'openai' | 'local' | 'demo'; message?: string }> {
+  const form = new FormData()
+  form.append('evidence', file, file.name)
+  return request('/evidence/extract', { method: 'POST', body: form })
+}
+
+export async function updateCaseDetails(id: string, details: { respondentAddress: string }): Promise<CaseRecord> {
+  return request(`/cases/${id}/details`, { method: 'PATCH', body: JSON.stringify(details) })
 }
 
 export async function updateCaseStatus(id: string, status: string): Promise<CaseRecord> {
@@ -59,11 +83,8 @@ export async function updateCaseStatus(id: string, status: string): Promise<Case
 async function voiceRequest(path: string, options: RequestInit): Promise<Response> {
   const headers = new Headers(options.headers)
   Object.entries(authHeaders()).forEach(([key, value]) => headers.set(key, value))
-  const response = await fetch(`${API}${path}`, { ...options, headers })
-  if (!response.ok) {
-    const payload = await response.json().catch(() => null) as { message?: string } | null
-    throw new Error(payload?.message ?? 'Voice service is temporarily unavailable')
-  }
+  const response = await fetch(`${API}${path}`, { ...options, headers, cache: 'no-store' })
+  if (!response.ok) throw await responseError(response)
   return response
 }
 
@@ -87,7 +108,49 @@ export async function speakText(text: string): Promise<Blob> {
   return response.blob()
 }
 
-export function packUrl(id: string) {
-  const token = localStorage.getItem('katiba_os_token') ?? ''
-  return `${API}/cases/${id}/pack?token=${encodeURIComponent(token)}`
+async function fetchCasePack(id: string) {
+  const response = await fetch(`${API}/cases/${id}/pack`, {
+    headers: authHeaders(),
+    cache: 'no-store',
+  })
+  if (!response.ok) throw await responseError(response)
+  const blob = await response.blob()
+  if (!blob.type.includes('pdf')) throw new Error('The server did not return a valid PDF pack.')
+  return blob
+}
+
+export async function openCasePack(id: string, page = 1) {
+  const preview = window.open('about:blank', '_blank')
+  if (preview) {
+    preview.opener = null
+    preview.document.title = 'Opening Katiba OS PDF pack…'
+    preview.document.body.textContent = 'Preparing your secure PDF pack…'
+  }
+  try {
+    const blob = await fetchCasePack(id)
+    const url = URL.createObjectURL(blob)
+    if (preview) preview.location.replace(`${url}#page=${page}`)
+    else {
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `Katiba-OS-${id}-pack.pdf`
+      link.click()
+    }
+    window.setTimeout(() => URL.revokeObjectURL(url), 120_000)
+  } catch (error) {
+    preview?.close()
+    throw error
+  }
+}
+
+export async function downloadCasePack(id: string) {
+  const blob = await fetchCasePack(id)
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `Katiba-OS-${id}-pack.pdf`
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 30_000)
 }
